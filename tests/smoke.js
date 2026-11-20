@@ -1,4 +1,4 @@
-// Neon Drift v0.1.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Drift v0.2.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
   simulateRun, centrePolicy, greedyPolicy, TUNNEL_RADIUS, SHIP_RADIUS, SHIELDS,
@@ -14,16 +14,22 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.1.0', VERSION === '0.1.0');
-check('6 tracks defined', TRACKS.length === 6);
-check('track ids are 1..6 in order', TRACKS.every((t, i) => t.id === i + 1));
+check('physics version is 0.2.0', VERSION === '0.2.0');
+check('12 tracks defined', TRACKS.length === 12);
+check('track ids are 1..12 in order', TRACKS.every((t, i) => t.id === i + 1));
 check('every track has a name and a hint', TRACKS.every((t) => t.name && t.hint));
-check('every track has a distinct theme disc', new Set(TRACKS.map((t) => t.theme.disc)).size === 6);
-check('every track has a distinct theme ring', new Set(TRACKS.map((t) => t.theme.ring)).size === 6);
+check('every track has a distinct theme disc', new Set(TRACKS.map((t) => t.theme.disc)).size === 12);
+check('every track has a distinct theme ring', new Set(TRACKS.map((t) => t.theme.ring)).size === 12);
 check('track lengths grow with difficulty', TRACKS.every((t, i) => i === 0 || t.length > TRACKS[i - 1].length));
 check('base speeds grow with difficulty', TRACKS.every((t, i) => i === 0 || t.baseSpeed >= TRACKS[i - 1].baseSpeed));
+check('max speeds grow with difficulty', TRACKS.every((t, i) => i === 0 || t.maxSpeed >= TRACKS[i - 1].maxSpeed));
 check('trackById finds track 3', trackById(3) && trackById(3).name === 'Gold Rush');
+check('trackById finds track 12', trackById(12) && trackById(12).name === 'Void Crown');
 check('trackById returns null for unknown id', trackById(99) === null);
+check('tracks 7+ introduce the spiral rhythm (5 of 6 new tracks)',
+  TRACKS.slice(6).filter((t) => t.segments.some((s) => s.type === 'spiral')).length >= 5);
+check('every track has at least 4 distinct segment types',
+  TRACKS.every((t) => new Set(t.segments.map((s) => s.type)).size >= 4));
 
 // --- built tracks are dense, deterministic, and inside the tunnel ---
 for (const track of TRACKS) {
@@ -261,8 +267,11 @@ check('collect and gate are small with no hit-stop',
   check('recordBest stores distance and score', save.best[1].distance === 1234 && save.best[1].score === 5678);
   recordBest(save, 1, 900, 9999);
   check('recordBest keeps the better of each', save.best[1].distance === 1234 && save.best[1].score === 9999);
+  recordBest(save, 12, 3300, 12345);
+  check('recordBest stores bests for track 12', save.best[12].distance === 3300 && save.best[12].score === 12345);
   const back = parseSave(serializeSave(save));
   check('save round-trips bests', back.best[1].distance === 1234 && back.best[1].score === 9999);
+  check('save round-trips track 12 bests', back.best[12].distance === 3300 && back.best[12].score === 12345);
   check('garbage save text falls back to defaults', parseSave('not json').version === SAVE_VERSION);
   check('save drops bests for unknown tracks', Object.keys(parseSave('{"best":{"99":{"distance":1,"score":1}}}').best).length === 0);
   check('save clamps absurd distances', parseSave('{"best":{"1":{"distance":999999,"score":1}}}').best[1].distance === 10000);

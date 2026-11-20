@@ -1,9 +1,9 @@
-// Neon Drift v0.1.0 — headless Chromium render check.
+// Neon Drift v0.2.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (attract flight actually
 //     flies — the demo ship moves), with no version/engine text anywhere
-//     the player can see, one clear primary Play action, and 6 track cards
+//     the player can see, one clear primary Play action, and 12 track cards
 //   - Play starts a run: the HUD shows, the ship steers (hook input moves
 //     it), speed ramps, distance grows
 //   - the autopilot (greedy steering bot, same policy as tests/bot.js)
@@ -125,8 +125,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.1.0') throw new Error(`expected version 0.1.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.1.0');
+  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -142,18 +142,18 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing');
-  if (menuText.includes('v0.1.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
   const trackCards = await page.locator('#track-select .track-card').count();
-  if (trackCards !== 6) throw new Error(`expected 6 track cards, got ${trackCards}`);
+  if (trackCards !== 12) throw new Error(`expected 12 track cards, got ${trackCards}`);
   const tracks = await page.evaluate(() => window.__drift.tracks());
-  if (tracks.length !== 6 || tracks[0].name !== 'First Light' || tracks[5].name !== 'Event Horizon') {
+  if (tracks.length !== 12 || tracks[0].name !== 'First Light' || tracks[11].name !== 'Void Crown') {
     throw new Error(`track list wrong: ${JSON.stringify(tracks.map((t) => t.name))}`);
   }
-  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 6 tracks');
+  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 tracks');
 
   // The attract flight flies behind the menu: the demo ship steers
   // through track 1 with the greedy policy, so the menu scene is alive

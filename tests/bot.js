@@ -1,4 +1,4 @@
-// Neon Drift v0.1.0 — bot harness: the greedy steering bot plays every
+// Neon Drift v0.2.0 — bot harness: the greedy steering bot plays every
 // track to completion through the public stepRun + policy hooks, and the
 // anti-slop gate asserts holding centre CANNOT finish any track — if the
 // bot could clear a track without steering, the track would not be done.
@@ -20,4 +20,4 @@ for (const track of TRACKS) {
 }
 
 if (failures) { console.error(`bot: ${failures} failure(s)`); process.exit(1); }
-console.log('bot: PASS — steering bot completes all 6 tracks, holding centre fails all 6');
+console.log('bot: PASS — steering bot completes all 12 tracks, holding centre fails all 12');
