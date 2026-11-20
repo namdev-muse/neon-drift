@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Neon Drift — 3D Neon Tunnel Racer</title>
+<meta name="description" content="Neon Drift: a 3D neon tunnel racer. Steer your ship through a glowing tunnel at rising speed — dodge obstacles, thread boost gates, collect energy.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="game-container"></div>
+<div id="hit-flash" class="hit-flash" aria-hidden="true"></div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="hud-left">
+    <span id="hud-track">Track 1 — First Light</span>
+    <span id="hud-shields" class="hud-shields" aria-label="Shields"></span>
+  </div>
+  <div class="hud-mid">
+    <span id="hud-score">Score 0</span>
+    <span id="hud-distance">0 m</span>
+    <span id="hud-speed">0 u/s</span>
+  </div>
+  <div class="hud-right">
+    <div id="hud-boost" class="hud-boost" aria-label="Boost meter">
+      <div id="boost-fill"></div>
+      <span id="boost-label">BOOST</span>
+    </div>
+    <button id="btn-mute-hud" class="icon-btn" type="button" aria-label="Toggle sound">Sound: On</button>
+    <button id="btn-pause" class="icon-btn" type="button" aria-label="Pause game">Pause</button>
+  </div>
+</div>
+<div id="hud-toast" class="hud-toast" aria-hidden="true"></div>
+<div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
+
+<!-- Main menu -->
+<div id="menu" class="overlay">
+  <div class="panel panel-menu">
+    <h1>NEON DRIFT</h1>
+    <p class="tagline">Steer the ship. Thread the gates. Outrun the tunnel.</p>
+    <div class="menu-col menu-actions">
+      <button id="btn-play" class="btn primary" type="button">Play</button>
+      <button id="btn-howto" class="btn" type="button">How to Play</button>
+      <button id="btn-settings" class="btn" type="button">Settings</button>
+      <button id="btn-mute-menu" class="btn small" type="button">Sound: On</button>
+      <p id="menu-best" class="menu-best"></p>
+    </div>
+    <div class="menu-col menu-setup">
+      <div id="track-select" class="track-select" aria-label="Track select"></div>
+      <p id="track-hint" class="track-hint"></p>
+    </div>
+  </div>
+</div>
+
+<!-- How to play -->
+<div id="howto" class="overlay hidden">
+  <div class="panel">
+    <h2>How to Play</h2>
+    <ul class="howto-list">
+      <li><strong>Steer</strong> with the mouse / finger drag, or <strong>arrow keys / WASD</strong>. The ship has momentum — it banks into turns, so steer early.</li>
+      <li>Your ship flies forward on its own, faster the longer you survive. <strong>Dodge</strong> the violet blocks and mines, and the moving barrier walls — fly through the <strong>gap</strong>, never the wall.</li>
+      <li>Thread the <strong>magenta boost gates</strong> for speed and score. A gate refills your boost meter, so the fast line runs through the gates.</li>
+      <li>Collect <strong>gold energy cells</strong> for score. Skim close past an obstacle for a <strong>near-miss</strong> bonus — the moment briefly slows so you can enjoy it.</li>
+      <li><strong>Hold Space</strong> (or the Boost button on touch) to burn boost — it drains the meter, so spend it where the tunnel is clear.</li>
+      <li>You have <strong>3 shields</strong>. A hit costs one and stuns the ship; lose all three and the run ends. Reach the end of the track to complete it.</li>
+      <li>Score comes from distance, gates and cells. Your <strong>best distance</strong> is saved per track — beat it.</li>
+    </ul>
+    <h3>Controls</h3>
+    <ul class="howto-list">
+      <li>Mouse / touch: drag to steer &middot; Space / Boost button: boost</li>
+      <li>Arrow keys / WASD: steer &middot; P: pause &middot; M: mute &middot; R: restart</li>
+      <li>Esc closes a panel &middot; Enter confirms on menus</li>
+    </ul>
+    <button id="btn-howto-close" class="btn primary" type="button">Got it</button>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings" class="overlay hidden">
+  <div class="panel">
+    <h2>Settings</h2>
+    <label class="slider-row">Volume
+      <input id="volume-range" type="range" min="0" max="100" value="60" aria-label="Volume">
+      <span id="volume-value">60%</span>
+    </label>
+    <label class="slider-row">Screen shake
+      <input id="shake-range" type="range" min="0" max="100" value="100" aria-label="Screen shake strength">
+      <span id="shake-value">100%</span>
+    </label>
+    <label class="toggle-row">Music
+      <input id="music-toggle" type="checkbox" checked aria-label="Music on or off">
+    </label>
+    <label class="toggle-row">Sound effects
+      <input id="sfx-toggle" type="checkbox" checked aria-label="Sound effects on or off">
+    </label>
+    <label class="toggle-row">Reduce flashing
+      <input id="reduce-flashing" type="checkbox" aria-label="Reduce flashing — no bright flashes">
+    </label>
+    <button id="btn-settings-close" class="btn primary" type="button">Back to Menu</button>
+  </div>
+</div>
+
+<!-- Track complete -->
+<div id="complete" class="overlay hidden">
+  <div class="panel">
+    <h2>Track Complete</h2>
+    <p id="complete-score" class="big-score">Score 0</p>
+    <p id="complete-detail"></p>
+    <p id="complete-best" class="complete-best"></p>
+    <button id="btn-next" class="btn primary" type="button">Next Track</button>
+    <button id="btn-replay" class="btn" type="button">Fly Again</button>
+    <button id="btn-menu-complete" class="btn" type="button">Main Menu</button>
+  </div>
+</div>
+
+<!-- Run over -->
+<div id="runover" class="overlay hidden">
+  <div class="panel">
+    <h2>Ship Down</h2>
+    <p id="runover-text">The tunnel wins this time.</p>
+    <p id="runover-stats" class="runover-stats"></p>
+    <p id="runover-best" class="complete-best"></p>
+    <button id="btn-retry" class="btn primary" type="button">Fly Again</button>
+    <button id="btn-menu-runover" class="btn" type="button">Main Menu</button>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause" class="overlay hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <button id="btn-resume" class="btn primary" type="button">Resume</button>
+    <button id="btn-restart" class="btn" type="button">Restart Track</button>
+    <button id="btn-quit" class="btn" type="button">Quit to Menu</button>
+    <label class="slider-row">Screen shake
+      <input id="shake-range-pause" type="range" min="0" max="100" value="100" aria-label="Screen shake strength">
+      <span id="shake-value-pause">100%</span>
+    </label>
+    <button id="btn-mute-pause" class="btn small" type="button">Sound: On</button>
+  </div>
+</div>
+
+<!-- Touch boost button (shown only on coarse pointers, while flying) -->
+<button id="btn-boost" class="btn primary boost-btn hidden" type="button" aria-label="Hold to boost">BOOST</button>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
