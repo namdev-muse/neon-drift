@@ -1,4 +1,4 @@
-// Neon Drift v0.2.0 — pure simulation core (no DOM, no Three.js).
+// Neon Drift v0.2.1 — pure simulation core (no DOM, no Three.js).
 // The ship auto-flies forward through a neon tunnel; the player steers
 // in the tunnel cross-section (x, y) with momentum and banking. Entities
 // live at a distance z along the track: blocks, mines, moving barriers,
@@ -7,7 +7,7 @@
 // Deterministic: every track is built from a fixed seed, and the fixed
 // step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.2.1';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;

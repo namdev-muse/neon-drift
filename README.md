@@ -9,7 +9,7 @@ track to complete it. Score comes from distance, gates and cells — your
 best distance is saved per track.
 
 **Live:** https://namdev-muse.github.io/neon-drift/
-**Version:** v0.2.0 (M2 track craft)
+**Version:** v0.2.1 (M2 track craft + steering-mirror hotfix)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX, GitHub Pages.
 
 ## Gameplay

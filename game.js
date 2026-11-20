@@ -1,4 +1,4 @@
-// Neon Drift v0.2.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
+// Neon Drift v0.2.1 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
 // The ship auto-flies forward through a neon tunnel; the player steers in
 // the cross-section with momentum and banking. Dodge blocks, mines and
 // moving barrier walls; thread magenta boost gates; collect gold energy
@@ -593,13 +593,24 @@ function currentSteerInput() {
     const mag = clamp(d / 3, 0, 1);
     return { sx: (dx / d) * mag, sy: (dy / d) * mag, boost: false };
   }
+  // HUMAN input (keyboard / drag) — screen space, not world space.
+  // The chase camera sits at z=-8.5 and looks toward +z, so its right
+  // vector is world -x: the view is mirrored left-right, and world +x
+  // appears on the LEFT of the screen. A player pressing ArrowLeft
+  // expects the ship to move screen-left, which is world +x — so the
+  // lateral component of human input is negated here. (This was a
+  // live-site find in v0.2.0: every steering test before it measured
+  // world x only, so the mirror went unnoticed from M1 onward.)
+  // Autopilot / hookSteer / steerTarget above are NOT negated: they
+  // drive the simulation in world coordinates by contract (the bot
+  // harness, the render check and the playtest probes all use them).
   let sx = 0, sy = 0;
-  if (keys.has('ArrowLeft') || keys.has('KeyA')) sx -= 1;
-  if (keys.has('ArrowRight') || keys.has('KeyD')) sx += 1;
+  if (keys.has('ArrowLeft') || keys.has('KeyA')) sx += 1;
+  if (keys.has('ArrowRight') || keys.has('KeyD')) sx -= 1;
   if (keys.has('ArrowUp') || keys.has('KeyW')) sy += 1;
   if (keys.has('ArrowDown') || keys.has('KeyS')) sy -= 1;
   if (dragging) {
-    sx += clamp(dragX / 110, -1, 1);
+    sx -= clamp(dragX / 110, -1, 1);
     sy += clamp(-dragY / 110, -1, 1);
   }
   const boost = keys.has('Space') || boostHeld;
@@ -988,6 +999,15 @@ window.__drift = {
       time: run.time, gatesHit: run.gatesHit, cellsHit: run.cellsHit,
       nearMisses: run.nearMisses, hitsTaken: run.hitsTaken,
       ship: { x: run.x, y: run.y, vx: run.vx, vy: run.vy },
+      // Screen position of the ship (pixels) — the chase camera looks
+      // along +z, so the view is mirrored left-right and world x is
+      // NOT screen x. Tests assert steering direction in screen space
+      // through this (v0.2.0: the mirror went unnoticed while tests
+      // only read world x).
+      screen: (() => {
+        const sp = new THREE.Vector3(run.x, run.y, 0).project(camera);
+        return { x: (sp.x + 1) / 2 * window.innerWidth, y: (1 - sp.y) / 2 * window.innerHeight };
+      })(),
       done: run.done, reason: run.reason, upcoming,
     };
   },
