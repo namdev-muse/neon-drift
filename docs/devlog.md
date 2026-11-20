@@ -105,3 +105,53 @@ assertion.
 - Best-distance saves for tracks 7–12 needed a save-schema fix: the
   old parser only accepted track ids 1–6. Fixed in this milestone
   (ids 1–12 accepted).
+
+## M3 — Feel & juice (v0.3.0) — 2026-11-21
+
+Third milestone: the flying has to *feel* great, not just work. Every
+event now fires a full 5–8 layer bundle (the game-feel recipe), and the
+contract lives in `physics.js` as `FEEDBACK_LAYERS` — the smoke test
+asserts every event carries 5–8 known layers, and the render check
+asserts the layers actually fire in the browser.
+
+**Built:**
+- **Floating score pops:** pooled DOM divs at the event's projected
+  screen position (+250 gate, +100 cell, +25 near-miss, total on
+  complete), overshoot pop + rise + fade, offset just above the event
+  so the number never sits on the ship. The gate/near-miss toasts are
+  gone — the pop is the feedback now.
+- **Camera polish:** roll with the bank, speed pull-back, hit
+  knockback (camera z push), FOV pulse on gates/boost/complete on top
+  of the speed kick. Every layer decays in real time to its exact rest
+  value (FOV 72, z -8.5, roll 0).
+- **Audio deepening:** the static pad is now a generative synthwave
+  sequencer — A-minor bass line plus a pentatonic arpeggio that doubles
+  in density as the ship speeds up, over the pad. SFX are pitch-varied
+  (±5%) so repeated gates never machine-gun; near-miss and boost get a
+  filtered-noise whoosh.
+- **Ship detail:** canopy + twin engine glows that breathe with speed
+  and pulse on gates/cells; hit squash (wider, flatter, springs back).
+- **Rest-state proof:** the render check pauses mid-run and asserts
+  trauma 0, time scale 1, FOV back to its speed baseline, camera z and
+  roll at rest — and proves the accessibility toggles do what they say
+  (shake 0% → trauma fires, camera still; reduce-flashing ON → no
+  flash, OFF → flash).
+
+**Tests:** smoke 312/312, bot 12/12, render check PASS (zero console
+errors) including all new M3 assertions, size sweep inspected by eye
+at 1280x720, 2560x1080, 1080x2340 — clean at all three.
+
+**Playtest verdict:** GO — it feels great. A lagged, noisy
+human-like chaser on T1: 16 pops in 41 s of game time (an event every
+1–3 s), peak FOV 82.4, hit trauma 0.45 with knockback 1.0, slow-mo on
+4 near-misses, 728 m with 1 shield left. On T7: 23 pops, peak FOV
+87.0, 9 gates and 10 cells before dying at 1085 m — challenging but
+fair, the spiral still demands real steering. (See the M3 milestone
+log for the honest detail, including the probe bug that made the first
+T7 leg fly with no input at all.)
+
+**Known issues:**
+- Under swiftshader the game runs at ~5 fps, so short-lived juice
+  (a 0.15 s trauma spike, a 120 ms flash) can fall between frames —
+  the render check polls every 50 ms and captures values atomically
+  in-page instead of reading them after the fact.
