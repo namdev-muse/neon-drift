@@ -1,4 +1,4 @@
-// Neon Drift v0.1.0 — pure simulation core (no DOM, no Three.js).
+// Neon Drift v0.2.0 — pure simulation core (no DOM, no Three.js).
 // The ship auto-flies forward through a neon tunnel; the player steers
 // in the tunnel cross-section (x, y) with momentum and banking. Entities
 // live at a distance z along the track: blocks, mines, moving barriers,
@@ -7,7 +7,7 @@
 // Deterministic: every track is built from a fixed seed, and the fixed
 // step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;
@@ -68,6 +68,9 @@ export const FEEDBACK = {
 //   barrier — moving barrier walls; the gap slides, time the pass
 //   weave   — blocks top/bottom with cells in the gaps
 //   gauntlet— dense mixed blocks + mines, no free centre line
+//   spiral  — gates orbit the centre on a widening circle, the ship must
+//             orbit with them; a mine guards the hub so the centre is
+//             never free (new in M2, the signature rhythm of tracks 7+)
 export const TRACKS = [
   {
     id: 1, name: 'First Light', seed: 101,
@@ -168,6 +171,125 @@ export const TRACKS = [
       { at: 2020, len: 80, type: 'gates', count: 2, amp: 5 },
     ],
   },
+  {
+    id: 7, name: 'Solar Flare', seed: 707,
+    hint: 'The gates start to orbit. Fly the circle, not the line.',
+    length: 2300, baseSpeed: 19, maxSpeed: 34,
+    theme: { ring: '#fb923c', glow: '#c2410c', accent: '#facc15', disc: '#1f0d02', tint: '#fed7aa' },
+    segments: [
+      { at: 60, len: 160, type: 'gates', count: 4, amp: 4 },
+      { at: 250, len: 200, type: 'spiral', count: 5, amp: 5 },
+      { at: 480, len: 220, type: 'slalom', count: 5, amp: 5.5 },
+      { at: 730, len: 220, type: 'mines', rows: 5, amp: 4.5 },
+      { at: 980, len: 140, type: 'barrier', count: 2, amp: 5 },
+      { at: 1150, len: 200, type: 'weave', count: 5, amp: 5.5 },
+      { at: 1380, len: 200, type: 'spiral', count: 5, amp: 5.5 },
+      { at: 1610, len: 220, type: 'gauntlet', count: 5, amp: 5 },
+      { at: 1860, len: 140, type: 'barrier', count: 1, amp: 5.5 },
+      { at: 2030, len: 180, type: 'gates', count: 4, amp: 5 },
+    ],
+  },
+  {
+    id: 8, name: 'Emerald Rush', seed: 808,
+    hint: 'Walls everywhere. Watch the gap slide, then commit.',
+    length: 2500, baseSpeed: 20, maxSpeed: 35,
+    theme: { ring: '#4ade80', glow: '#15803d', accent: '#22d3ee', disc: '#04170c', tint: '#bbf7d0' },
+    segments: [
+      { at: 60, len: 160, type: 'gates', count: 4, amp: 4.5 },
+      { at: 250, len: 160, type: 'barrier', count: 2, amp: 5 },
+      { at: 440, len: 200, type: 'weave', count: 5, amp: 5.5 },
+      { at: 670, len: 220, type: 'mines', rows: 5, amp: 4.5 },
+      { at: 920, len: 160, type: 'barrier', count: 2, amp: 5.5 },
+      { at: 1110, len: 220, type: 'slalom', count: 5, amp: 6 },
+      { at: 1360, len: 180, type: 'gates', count: 4, amp: 5 },
+      { at: 1570, len: 160, type: 'barrier', count: 2, amp: 5.5 },
+      { at: 1760, len: 200, type: 'weave', count: 5, amp: 6 },
+      { at: 1990, len: 220, type: 'mines', rows: 6, amp: 5 },
+      { at: 2240, len: 160, type: 'gates', count: 3, amp: 5 },
+    ],
+  },
+  {
+    id: 9, name: 'Rose Nebula', seed: 909,
+    hint: 'Minefields with a corridor — find it, then orbit out.',
+    length: 2700, baseSpeed: 21, maxSpeed: 36,
+    theme: { ring: '#f9a8d4', glow: '#be185d', accent: '#a78bfa', disc: '#22081a', tint: '#fbcfe8' },
+    segments: [
+      { at: 60, len: 160, type: 'gates', count: 4, amp: 4.5 },
+      { at: 250, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 520, len: 220, type: 'spiral', count: 6, amp: 5.5 },
+      { at: 770, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 1040, len: 200, type: 'weave', count: 5, amp: 6 },
+      { at: 1270, len: 200, type: 'barrier', count: 2, amp: 4.5 },
+      { at: 1460, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 1730, len: 220, type: 'slalom', count: 5, amp: 6 },
+      { at: 1980, len: 220, type: 'spiral', count: 6, amp: 6 },
+      { at: 2230, len: 200, type: 'gates', count: 4, amp: 5.5 },
+      { at: 2460, len: 140, type: 'barrier', count: 1, amp: 6 },
+    ],
+  },
+  {
+    id: 10, name: 'Azure Deep', seed: 1010,
+    hint: 'Gauntlets back to back. There is no breather here.',
+    length: 2900, baseSpeed: 22, maxSpeed: 37,
+    theme: { ring: '#60a5fa', glow: '#1d4ed8', accent: '#f472b6', disc: '#061224', tint: '#bfdbfe' },
+    segments: [
+      { at: 60, len: 160, type: 'gates', count: 4, amp: 5 },
+      { at: 250, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 520, len: 200, type: 'weave', count: 5, amp: 6 },
+      { at: 750, len: 160, type: 'barrier', count: 2, amp: 5.5 },
+      { at: 940, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 1210, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 1480, len: 220, type: 'slalom', count: 5, amp: 6 },
+      { at: 1730, len: 160, type: 'barrier', count: 2, amp: 6 },
+      { at: 1920, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 2190, len: 220, type: 'spiral', count: 6, amp: 6 },
+      { at: 2440, len: 200, type: 'gates', count: 4, amp: 5.5 },
+      { at: 2670, len: 140, type: 'barrier', count: 1, amp: 6 },
+    ],
+  },
+  {
+    id: 11, name: 'Acid Rain', seed: 1111,
+    hint: 'Orbit, slalom, orbit. The tunnel never flies straight.',
+    length: 3100, baseSpeed: 23, maxSpeed: 38,
+    theme: { ring: '#a3e635', glow: '#4d7c0f', accent: '#f472b6', disc: '#101a04', tint: '#d9f99d' },
+    segments: [
+      { at: 60, len: 200, type: 'spiral', count: 5, amp: 5 },
+      { at: 290, len: 220, type: 'slalom', count: 5, amp: 5.5 },
+      { at: 540, len: 220, type: 'spiral', count: 6, amp: 5.5 },
+      { at: 790, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 1060, len: 160, type: 'barrier', count: 2, amp: 6 },
+      { at: 1250, len: 240, type: 'gauntlet', count: 5, amp: 5 },
+      { at: 1520, len: 200, type: 'weave', count: 5, amp: 6 },
+      { at: 1750, len: 220, type: 'spiral', count: 6, amp: 6 },
+      { at: 2000, len: 220, type: 'slalom', count: 5, amp: 6 },
+      { at: 2250, len: 160, type: 'barrier', count: 2, amp: 6 },
+      { at: 2440, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 2710, len: 200, type: 'gates', count: 4, amp: 6 },
+      { at: 2940, len: 140, type: 'barrier', count: 1, amp: 6 },
+    ],
+  },
+  {
+    id: 12, name: 'Void Crown', seed: 1212,
+    hint: 'Everything you learned, at full speed. Earn the crown.',
+    length: 3300, baseSpeed: 24, maxSpeed: 39,
+    theme: { ring: '#e879f9', glow: '#a21caf', accent: '#fbbf24', disc: '#1e0424', tint: '#f5d0fe' },
+    segments: [
+      { at: 60, len: 180, type: 'gates', count: 4, amp: 5 },
+      { at: 270, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 540, len: 220, type: 'spiral', count: 6, amp: 6 },
+      { at: 790, len: 200, type: 'barrier', count: 2, amp: 5 },
+      { at: 980, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 1250, len: 220, type: 'slalom', count: 5, amp: 6 },
+      { at: 1500, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 1770, len: 200, type: 'weave', count: 5, amp: 6 },
+      { at: 2000, len: 200, type: 'barrier', count: 2, amp: 5 },
+      { at: 2190, len: 220, type: 'spiral', count: 6, amp: 6 },
+      { at: 2440, len: 240, type: 'mines', rows: 6, amp: 5 },
+      { at: 2710, len: 240, type: 'gauntlet', count: 6, amp: 5.5 },
+      { at: 2980, len: 180, type: 'gates', count: 4, amp: 6 },
+      { at: 3180, len: 100, type: 'barrier', count: 1, amp: 6 },
+    ],
+  },
 ];
 
 export function trackById(id) {
@@ -197,7 +319,13 @@ function pushEntities(out, track, seg, rng) {
       // The opposite side is open, but a mine guards the centre line
       // so holding centre is never free.
       out.push({ kind: 'mine', z: z + step * 0.5, x: rand(-1.2, 1.2), y: rand(-1.2, 1.2), r: 1.1 });
-      if (i % 2 === 0) out.push({ kind: 'gate', z: z + step * 0.25, x: -side * amp * 0.8, y: rand(-2, 2), r: 2.4 });
+      // The gate rides AFTER the mine (z + 0.75 step), not before it.
+      // M2 fairness fix: with the gate before the mine, the swing from
+      // the gate to the next block's safe side crossed the mine's line
+      // 11u later — a trap even a good line could not thread at speed.
+      // Now the mine is met while the ship is still on the open side,
+      // and the gate-to-next-block swing has no obstacle in the way.
+      if (i % 2 === 0) out.push({ kind: 'gate', z: z + step * 0.75, x: -side * amp * 0.8, y: rand(-2, 2), r: 2.4 });
     } else if (type === 'mines') {
       const rows = seg.rows || 4;
       // One clear corridor per row: corridor centre wanders, mines keep
@@ -238,6 +366,19 @@ function pushEntities(out, track, seg, rng) {
       // Centre is always guarded in the gauntlet.
       out.push({ kind: 'mine', z: z + step * 0.85, x: rand(-1.5, 1.5), y: rand(-1.5, 1.5), r: 1.1 });
       if (i % 2 === 1) out.push({ kind: 'gate', z: z + step * 0.5, x: rand(-5, 5), y: rand(-4, 4), r: 2.4 });
+    } else if (type === 'spiral') {
+      // Gates orbit the centre: 1.5 turns across the segment, so the
+      // ship must fly a circle, not a line. Cells ride the orbit
+      // halfway between gates; a mine guards the hub on every other
+      // step so holding centre is never free.
+      const turns = 1.5;
+      const ang = (i / Math.max(1, count)) * Math.PI * 2 * turns + (track.seed % 7);
+      const gx = clamp(Math.cos(ang) * amp * 0.85, -7, 7);
+      const gy = clamp(Math.sin(ang) * amp * 0.7, -6, 6);
+      out.push({ kind: 'gate', z, x: gx, y: gy, r: 2.4 });
+      const ang2 = ang + (Math.PI * turns) / Math.max(1, count);
+      out.push({ kind: 'cell', z: z + step * 0.5, x: clamp(Math.cos(ang2) * amp * 0.6, -7, 7), y: clamp(Math.sin(ang2) * amp * 0.5, -6, 6), r: 0.8 });
+      if (i % 2 === 0) out.push({ kind: 'mine', z: z + step * 0.25, x: rand(-1, 1), y: rand(-1, 1), r: 1.1 });
     }
   }
 }
@@ -452,6 +593,13 @@ export function greedyPolicy(run) {
         const c = d - SHIP_RADIUS;
         minClear = Math.min(minClear, c);
         score += w * Math.min(c, 6);
+        // Steep penalty for flying close to an obstacle: a human gives
+        // a mine or block a wide berth, but the old linear term scored
+        // a 0.4-clearance pass almost as well as a 2-clearance one, so
+        // the bot flew into centre mines while chasing gates. (M2: the
+        // harder tracks exposed this — the bot, not the tracks, was
+        // the weak link.)
+        if (c < 2) score -= w * (2 - c) * 5;
       }
       if (minClear < 0.4) continue; // would hit something — not a candidate
       // Reward: chase the next gate/cell if it is reachable safely.
@@ -506,7 +654,7 @@ export function parseSave(text) {
     if (!s || typeof s !== 'object') return d;
     if (s.best && typeof s.best === 'object') {
       for (const [k, v] of Object.entries(s.best)) {
-        if (/^[1-6]$/.test(k) && v && typeof v === 'object'
+        if (/^(?:[1-9]|1[0-2])$/.test(k) && v && typeof v === 'object'
           && Number.isFinite(v.distance) && Number.isFinite(v.score)) {
           d.best[k] = {
             distance: clamp(v.distance, 0, 10000),
