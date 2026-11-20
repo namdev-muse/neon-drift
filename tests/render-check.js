@@ -1,4 +1,4 @@
-// Neon Drift v0.2.0 — headless Chromium render check.
+// Neon Drift v0.2.1 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (attract flight actually
@@ -125,8 +125,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.0');
+  if (version !== '0.2.1') throw new Error(`expected version 0.2.1, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.1');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -142,7 +142,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing');
-  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.2.1') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -191,20 +191,52 @@ try {
   console.log(`render-check: steering moves the ship (x ${before.x.toFixed(2)} -> ${after.x.toFixed(2)}, banking vx ${after.vx.toFixed(1)})`);
 
   // Real keyboard steering works too (arrow keys are the public input).
-  // The ship still carries rightward momentum from the previous test,
-  // so hold ArrowLeft until the velocity actually reverses — under
-  // swiftshader a fixed real-time window is too short to prove it.
-  await page.keyboard.down('ArrowLeft');
+  // The ship still carries rightward WORLD momentum from the previous
+  // test (setSteer(1,0) drives world +x), so hold ArrowRight — which,
+  // after the v0.2.1 mirror fix, steers world -x — until the velocity
+  // actually reverses. Under swiftshader a fixed real-time window is
+  // too short to prove it, so this polls.
+  await page.keyboard.down('ArrowRight');
   try {
     await page.waitForFunction(() => window.__drift.info().ship.vx < -2, null, { timeout: 15000 });
   } finally {
-    await page.keyboard.up('ArrowLeft');
+    await page.keyboard.up('ArrowRight');
   }
   const kbAfter = await page.evaluate(() => window.__drift.info().ship);
   if (!(kbAfter.vx < -2)) {
-    throw new Error(`ArrowLeft did not reverse the ship: vx ${kbAfter.vx.toFixed(2)}`);
+    throw new Error(`ArrowRight did not reverse the ship: vx ${kbAfter.vx.toFixed(2)}`);
   }
-  console.log(`render-check: ArrowLeft steers (vx reversed to ${kbAfter.vx.toFixed(1)}, x ${kbAfter.x.toFixed(2)})`);
+  console.log(`render-check: ArrowRight steers (vx reversed to ${kbAfter.vx.toFixed(1)}, x ${kbAfter.x.toFixed(2)})`);
+
+  // Screen direction (v0.2.1): the chase camera looks along +z, so the
+  // view is mirrored left-right — world x is NOT screen x. ArrowLeft
+  // must move the ship LEFT on screen, ArrowRight RIGHT. v0.2.0 shipped
+  // this mirrored, and every earlier steering test read world x only,
+  // so the mirror went unnoticed from M1 onward. This assertion reads
+  // the ship's projected screen position, not world x.
+  const scr0 = await page.evaluate(() => window.__drift.info().screen);
+  await page.keyboard.down('ArrowLeft');
+  try {
+    await page.waitForFunction((x0) => window.__drift.info().screen.x < x0 - 20, scr0.x, { timeout: 20000 });
+  } finally {
+    await page.keyboard.up('ArrowLeft');
+  }
+  const scrL = await page.evaluate(() => window.__drift.info().screen);
+  if (!(scrL.x < scr0.x - 20)) {
+    throw new Error(`ArrowLeft did not move the ship left on screen: ${scr0.x.toFixed(0)} -> ${scrL.x.toFixed(0)}`);
+  }
+  console.log(`render-check: ArrowLeft moves the ship left on screen (${scr0.x.toFixed(0)} -> ${scrL.x.toFixed(0)})`);
+  await page.keyboard.down('ArrowRight');
+  try {
+    await page.waitForFunction((x0) => window.__drift.info().screen.x > x0 + 20, scrL.x, { timeout: 20000 });
+  } finally {
+    await page.keyboard.up('ArrowRight');
+  }
+  const scrR = await page.evaluate(() => window.__drift.info().screen);
+  if (!(scrR.x > scrL.x + 20)) {
+    throw new Error(`ArrowRight did not move the ship right on screen: ${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)}`);
+  }
+  console.log(`render-check: ArrowRight moves the ship right on screen (${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)})`);
 
   // Speed ramps and distance grows (poll — swiftshader game time runs
   // slower than real time, so a fixed window cannot prove it).
@@ -229,25 +261,36 @@ try {
   await page.screenshot({ path: path.join(SHOTS_DIR, 'gameplay-1280x720.png') });
   console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, tunnel rings, HUD)`);
 
-  // Steering into an obstacle costs a shield: aim at the nearest
-  // upcoming block/mine and hold the line.
+  // Steering into an obstacle costs a shield: aim at an upcoming
+  // block/mine and hold the line. Pick one at least 40 m ahead so the
+  // ship has time to steer onto it, and retry with the next one if the
+  // ship passes it by — the nearest obstacle can be metres ahead after
+  // the autopilot leg, too close to reach (v0.2.1 hardening; the
+  // slalom reorder moved the autopilot's stop point further along).
   const hitBefore = await page.evaluate(() => window.__drift.info());
-  const obstacle = await page.evaluate(() => {
-    const i = window.__drift.info();
-    return i.upcoming.find((e) => e.kind === 'block' || e.kind === 'mine') || null;
-  });
-  if (!obstacle) throw new Error('no upcoming block/mine to steer into');
-  await page.evaluate((o) => window.__drift.steerTo(o.x, o.y), obstacle);
-  const hit = await page.waitForFunction(() => {
-    const i = window.__drift.info();
-    return i.shields < 3 || i.done;
-  }, null, { timeout: 30000 }).then(() => true).catch(() => false);
-  await page.evaluate(() => window.__drift.clearTarget());
+  let hit = false, hitKind = null;
+  for (let attempt = 0; attempt < 4 && !hit; attempt++) {
+    const obstacle = await page.evaluate(() => {
+      const i = window.__drift.info();
+      if (!i || i.done) return null;
+      return i.upcoming.find((e) => (e.kind === 'block' || e.kind === 'mine') && e.z > i.distance + 40) || null;
+    });
+    if (!obstacle) break;
+    const shieldsNow = await page.evaluate(() => window.__drift.info().shields);
+    await page.evaluate((o) => window.__drift.steerTo(o.x, o.y), obstacle);
+    hit = await page.waitForFunction((sh) => {
+      const i = window.__drift.info();
+      return !i || i.shields < sh || i.done;
+    }, shieldsNow, { timeout: 30000 }).then(() => true).catch(() => false);
+    await page.evaluate(() => window.__drift.clearTarget());
+    if (hit) hitKind = obstacle.kind;
+    await page.waitForTimeout(500);
+  }
   const hitAfter = await page.evaluate(() => window.__drift.info());
   if (!hit || hitAfter.shields >= hitBefore.shields) {
-    throw new Error(`steering into a ${obstacle.kind} did not cost a shield (shields ${hitBefore.shields} -> ${hitAfter.shields})`);
+    throw new Error(`steering into obstacles did not cost a shield (shields ${hitBefore.shields} -> ${hitAfter.shields})`);
   }
-  console.log(`render-check: steering into a ${obstacle.kind} costs a shield (${hitBefore.shields} -> ${hitAfter.shields}), stun + flash fire`);
+  console.log(`render-check: steering into a ${hitKind} costs a shield (${hitBefore.shields} -> ${hitAfter.shields}), stun + flash fire`);
 
   // Pause focuses Resume; Enter resumes.
   await page.keyboard.press('p');
