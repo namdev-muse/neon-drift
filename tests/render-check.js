@@ -1,4 +1,4 @@
-// Neon Drift v0.3.0 — headless Chromium render check.
+// Neon Drift v0.4.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (attract flight actually
@@ -125,8 +125,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.0');
+  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.4.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -142,7 +142,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing');
-  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -154,6 +154,62 @@ try {
     throw new Error(`track list wrong: ${JSON.stringify(tracks.map((t) => t.name))}`);
   }
   console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 tracks');
+
+  // --- M4: progression & depth (menu level, fresh profile) ---
+  // Track 2 is locked on a fresh profile (the chain opens it at 50%
+  // of track 1). The locked card still answers a click — it says what
+  // opens it — and it must NOT start a run.
+  const lockedCount = await page.locator('#track-select .track-card.locked').count();
+  if (lockedCount !== 11) throw new Error(`expected 11 locked tracks on a fresh profile, got ${lockedCount}`);
+  const unlocked = await page.evaluate(() => window.__drift.unlocked(2));
+  if (unlocked) throw new Error('track 2 must start locked on a fresh profile');
+  await page.locator('#track-select .track-card').nth(1).click();
+  await page.waitForTimeout(300);
+  if (await page.evaluate(() => window.__drift.state.phase) !== 'menu') {
+    throw new Error('clicking a locked track card must not start a run');
+  }
+  const hintAfterLock = await page.textContent('#track-hint');
+  if (!hintAfterLock.includes('Locked')) throw new Error(`locked card click should explain the lock, hint: ${hintAfterLock}`);
+  console.log('render-check: M4 track 2 locked on a fresh profile; the locked card explains the requirement and does not start a run');
+
+  // Mode toggle: Time Trial turns Play into Race and shows par times.
+  await page.click('#btn-mode-timetrial');
+  const raceLabel = await page.textContent('#btn-play');
+  if (raceLabel !== 'Race') throw new Error(`Time Trial should relabel Play as Race, got: ${raceLabel}`);
+  const ttCard = await page.locator('#track-select .track-card').first().textContent();
+  if (!ttCard.includes('Par')) throw new Error(`Time Trial cards should show par times, got: ${ttCard}`);
+  await page.click('#btn-mode-campaign');
+  const playLabel = await page.textContent('#btn-play');
+  if (playLabel !== 'Play') throw new Error(`Campaign should relabel Race back to Play, got: ${playLabel}`);
+  console.log('render-check: M4 mode toggle — Play becomes Race in Time Trial, cards show par times');
+
+  // Upgrades screen: grant energy, buy Thrusters twice through the UI,
+  // and prove the price is charged and the level sticks. A third buy
+  // with too little energy must refuse and leave the balance alone.
+  await page.click('#btn-upgrades');
+  await page.waitForFunction(() => !document.getElementById('upgrades').classList.contains('hidden'), null, { timeout: 5000 });
+  const energy0 = await page.evaluate(() => window.__drift.grantEnergy(100));
+  if (energy0 !== 100) throw new Error(`grantEnergy should set the balance to 100, got ${energy0}`);
+  await page.locator('.upgrade-buy').first().click();
+  let upg = await page.evaluate(() => window.__drift.upgrades());
+  if (upg.levels.thrusters !== 1 || upg.energy !== 70) {
+    throw new Error(`first Thrusters buy should cost 30 (level 1, 70 left), got ${JSON.stringify(upg)}`);
+  }
+  await page.locator('.upgrade-buy').first().click();
+  upg = await page.evaluate(() => window.__drift.upgrades());
+  if (upg.levels.thrusters !== 2 || upg.energy !== 10) {
+    throw new Error(`second Thrusters buy should cost 60 (level 2, 10 left), got ${JSON.stringify(upg)}`);
+  }
+  await page.locator('.upgrade-buy').nth(2).click(); // Boost Tank costs 25, balance is 10
+  upg = await page.evaluate(() => window.__drift.upgrades());
+  if (upg.levels.tank !== 0 || upg.energy !== 10) {
+    throw new Error(`an unaffordable buy must refuse and leave the balance alone, got ${JSON.stringify(upg)}`);
+  }
+  const toastAfterRefusal = await page.textContent('#hud-toast');
+  if (!toastAfterRefusal.includes('need 25')) throw new Error(`refused buy should say why, toast: ${toastAfterRefusal}`);
+  await page.click('#btn-upgrades-close');
+  await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
+  console.log('render-check: M4 upgrades — Thrusters bought to level 2 through the UI (100 -> 70 -> 10 energy), unaffordable buy refused with a reason');
 
   // The attract flight flies behind the menu: the demo ship steers
   // through track 1 with the greedy policy, so the menu scene is alive
@@ -505,6 +561,59 @@ try {
     throw new Error(`best distance should be saved for track 1: ${JSON.stringify(saved.best)}`);
   }
   console.log(`render-check: best distance saved for track 1 (${Math.floor(saved.best[1].distance)} m), menu shows it`);
+
+  // --- M4: Time Trial end-to-end ---
+  // Switch to Time Trial, race track 1 with the autopilot, and finish
+  // it: the HUD must show the clock and the gold target, the run must
+  // bank energy, the complete screen must show the time and a medal,
+  // and finishing track 1 must unlock track 2.
+  await page.click('#btn-mode-timetrial');
+  await page.waitForFunction(() => window.__drift.mode === 'timetrial', null, { timeout: 5000 });
+  await page.evaluate(() => window.__drift.start(1, 'timetrial'));
+  await page.waitForFunction(() => window.__drift.state.phase === 'run', null, { timeout: 5000 });
+  if (await page.evaluate(() => document.getElementById('hud-time').classList.contains('hidden'))) {
+    throw new Error('Time Trial HUD must show the clock');
+  }
+  const hudTime = await page.textContent('#hud-time');
+  if (!hudTime.includes('GOLD')) throw new Error(`Time Trial HUD must show the gold target, got: ${hudTime}`);
+  await page.evaluate(() => window.__drift.autopilot(true));
+  // The clock must actually run (poll — swiftshader game time runs
+  // slower than real time).
+  await page.waitForFunction(() => window.__drift.info().time > 5, null, { timeout: 60000 });
+  const ttMid = await page.evaluate(() => window.__drift.info());
+  if (ttMid.mode !== 'timetrial') throw new Error(`run mode should be timetrial, got ${ttMid.mode}`);
+  console.log(`render-check: M4 Time Trial running — clock ${ttMid.time.toFixed(1)}s, HUD shows ${hudTime.trim()}`);
+  // A full track 1 at ~0.25x game time under swiftshader takes ~4-5
+  // real minutes; the autopilot (greedy bot) finishes it clean.
+  await page.waitForFunction(() => window.__drift.state.phase === 'complete', null, { timeout: 420000 });
+  await page.evaluate(() => window.__drift.autopilot(false));
+  const ttDone = await page.evaluate(() => window.__drift.info());
+  const ttSave = await page.evaluate(() => window.__drift.save());
+  const medalText = await page.textContent('#complete-medal');
+  const energyText = await page.textContent('#complete-energy');
+  if (!ttDone.medal && !medalText.includes('No medal')) {
+    throw new Error(`complete screen should show the medal (or no medal), got: ${medalText}`);
+  }
+  if (ttDone.medal && !medalText.toLowerCase().includes(ttDone.medal)) {
+    throw new Error(`complete screen medal ${medalText} does not match the run medal ${ttDone.medal}`);
+  }
+  if (!ttSave.bestTime[1] || Math.abs(ttSave.bestTime[1] - ttDone.time) > 0.2) {
+    throw new Error(`best Time Trial time should be saved (saved ${ttSave.bestTime[1]}, run ${ttDone.time.toFixed(1)})`);
+  }
+  if (!energyText.includes('Banked') || ttSave.energy < ttDone.energy) {
+    throw new Error(`run energy should be banked (run ${ttDone.energy}, saved ${ttSave.energy}): ${energyText}`);
+  }
+  console.log(`render-check: M4 Time Trial complete — ${ttDone.time.toFixed(1)}s, medal ${ttDone.medal || 'none'} (${medalText.trim()}), best time saved, ${ttDone.energy} energy banked`);
+  // Finishing track 1 unlocks track 2 — the chain moves.
+  await page.click('#btn-menu-complete');
+  await page.waitForFunction(() => window.__drift.state.phase === 'menu', null, { timeout: 5000 });
+  if (!await page.evaluate(() => window.__drift.unlocked(2))) {
+    throw new Error('finishing track 1 must unlock track 2');
+  }
+  const lockedAfter = await page.locator('#track-select .track-card.locked').count();
+  if (lockedAfter !== 10) throw new Error(`expected 10 locked tracks after unlocking track 2, got ${lockedAfter}`);
+  console.log('render-check: M4 finishing track 1 unlocks track 2 (10 tracks still locked)');
+  await page.click('#btn-mode-campaign');
 
   if (errors.length) {
     console.error('render-check: console/page errors:');

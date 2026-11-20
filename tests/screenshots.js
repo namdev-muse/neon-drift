@@ -1,4 +1,4 @@
-// Neon Drift v0.3.0 — real gameplay screenshot capture + size sweep.
+// Neon Drift v0.4.0 — real gameplay screenshot capture + size sweep.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // captures three PNGs into docs/screenshots/ for the README:
 //   menu.png      — the main menu over the live 3D attract scene
@@ -110,6 +110,15 @@ try {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'menu.png') });
     console.log('screenshots: menu.png captured');
 
+    // M4: upgrades screen (grant energy first so the Buy buttons show prices).
+    await page.evaluate(() => window.__drift.grantEnergy(120));
+    await page.click('#btn-upgrades');
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'upgrades.png') });
+    console.log('screenshots: upgrades.png captured');
+    await page.click('#btn-upgrades-close');
+    await page.waitForTimeout(400);
+
     await page.click('#btn-play');
     await page.waitForFunction(() => window.__drift.state.phase === 'run', null, { timeout: 5000 });
     await page.evaluate(() => window.__drift.autopilot(true));
@@ -184,6 +193,19 @@ try {
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(SWEEP_DIR, `${name.replace('menu', 'gameplay')}.png`) });
     console.log(`screenshots: size sweep ${name.replace('menu', 'gameplay')}.png captured`);
+    // M4: the upgrades list is the overflow risk on a tall narrow
+    // screen — capture it at the phone size too.
+    if (name === 'menu-1080x2340') {
+      await page.keyboard.press('p');
+      await page.waitForFunction(() => window.__drift.state.phase === 'paused', null, { timeout: 5000 });
+      await page.click('#btn-quit');
+      await page.waitForFunction(() => window.__drift.state.phase === 'menu', null, { timeout: 5000 });
+      await page.evaluate(() => window.__drift.grantEnergy(120));
+      await page.click('#btn-upgrades');
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: path.join(SWEEP_DIR, 'upgrades-1080x2340.png') });
+      console.log('screenshots: size sweep upgrades-1080x2340.png captured');
+    }
     await context.close();
   }
 
