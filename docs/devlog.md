@@ -80,6 +80,27 @@ gate orbit on T7), a lagged noisy hand-chaser threads all 9 gates to
 500 m on T7, and T11/T12 event timelines show a decision every 1–4 s
 with no dead stretches (see the M2 milestone log for the honest detail).
 
+### Hotfix v0.2.1 — steering was mirrored on screen (same run, before the finale)
+The live-site check after the v0.2.0 push found it: ArrowLeft moved the
+ship to the RIGHT side of the screen, and drag steering was mirrored
+the same way. Root cause: the chase camera sits at z=-8.5 and looks
+toward +z, so its right vector is world -x — the view is mirrored
+left-right. It had been there since M1: every steering test before it
+measured world x only (the ship DID move in world space), so the
+mirror was invisible to the whole test suite. The live browser check
+caught it with a matched-distance test (6× ArrowLeft → screen x≈1225,
+right of centre; 6× ArrowRight → x≈700, left).
+
+Fix: the lateral component of HUMAN input (keyboard + drag) is negated
+where screen input becomes world input, so ArrowLeft moves the ship
+screen-left. Autopilot, hookSteer and steerTarget are untouched — they
+drive the simulation in world coordinates by contract. The ship's bank
+was already correct on screen once the input is fixed. The render check
+now asserts screen direction (projected ship position): ArrowLeft must
+decrease screen x, ArrowRight must increase it. Tests re-run after the
+fix: smoke 275/275, bot 12/12, render PASS including the new screen
+assertion.
+
 **Known issues:**
 - Best-distance saves for tracks 7–12 needed a save-schema fix: the
   old parser only accepted track ids 1–6. Fixed in this milestone
