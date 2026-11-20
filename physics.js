@@ -1,4 +1,4 @@
-// Neon Drift v0.3.0 — pure simulation core (no DOM, no Three.js).
+// Neon Drift v0.4.0 — pure simulation core (no DOM, no Three.js).
 // The ship auto-flies forward through a neon tunnel; the player steers
 // in the tunnel cross-section (x, y) with momentum and banking. Entities
 // live at a distance z along the track: blocks, mines, moving barriers,
@@ -6,8 +6,14 @@
 // track length (complete) or loses all 3 shields (run over).
 // Deterministic: every track is built from a fixed seed, and the fixed
 // step simulation gives identical results for identical inputs.
+//
+// M4 — progression & depth: an energy economy (cells +2, gates +3,
+// distance gates +10, banked at run end), ship upgrades bought with
+// banked energy (Thrusters / Plating / Boost Tank, 3 tiers each), a
+// best-distance unlock chain (track N+1 opens at 50% best distance on
+// track N), and Time Trial mode (race the par time for medals).
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;
@@ -77,6 +83,93 @@ export const FEEDBACK_LAYERS = {
   runOver: ['sound', 'particles', 'shake', 'hitStop', 'flash', 'knockback', 'squash', 'toast'],
 };
 
+// --- M4: progression & depth ---
+// Energy economy: cells and gates pay energy, banked at run end and
+// spent on ship upgrades. Distance gates pay too — reaching 25/50/75/
+// 100% of a track is worth energy every run, so pushing further on a
+// track you have not finished is always worth something.
+// A typical clean run banks ~50 energy: tier-1 upgrades cost 25-30
+// (about one good run), a full line costs 175-210, all three lines 595 —
+// a full campaign playthrough earns roughly that, so upgrades feel
+// earned, not ground out.
+export const ENERGY_CELL = 2;
+export const ENERGY_GATE = 3;
+export const ENERGY_DIST_GATE = 10;
+export const DIST_GATE_FRACTIONS = [0.25, 0.5, 0.75, 1.0];
+
+// Ship upgrades: three lines, three tiers each. One clear effect per
+// line, visible in play (faster ship, shorter stun, bigger boost tank).
+// Costs rise so the third tier is a real decision, not a purchase.
+export const UPGRADE_DEFS = {
+  thrusters: {
+    name: 'Thrusters', maxLevel: 3, costs: [30, 60, 120],
+    desc: '+1 base speed and +2 top speed per level — the ship is simply faster.',
+  },
+  plating: {
+    name: 'Plating', maxLevel: 3, costs: [30, 60, 120],
+    desc: 'Stun after a hit is 15% shorter per level; level 3 adds a 4th shield.',
+  },
+  tank: {
+    name: 'Boost Tank', maxLevel: 3, costs: [25, 50, 100],
+    desc: '+25 boost capacity per level — burn boost longer, and gates refill more.',
+  },
+};
+export function upgradeEffect(upgrades) {
+  const u = upgrades || {};
+  const thr = clamp(Math.floor(u.thrusters || 0), 0, 3);
+  const pla = clamp(Math.floor(u.plating || 0), 0, 3);
+  const tan = clamp(Math.floor(u.tank || 0), 0, 3);
+  return {
+    baseSpeedBonus: thr * 1,
+    maxSpeedBonus: thr * 2,
+    stunMult: Math.pow(0.85, pla),
+    extraShields: pla >= 3 ? 1 : 0,
+    boostMax: BOOST_MAX + tan * 25,
+  };
+}
+// Buy one level of an upgrade with banked energy. Pure: returns
+// { ok, reason } and mutates the save only on success.
+export function buyUpgrade(save, id) {
+  const def = UPGRADE_DEFS[id];
+  if (!def) return { ok: false, reason: 'unknown upgrade' };
+  const level = save.upgrades[id] || 0;
+  if (level >= def.maxLevel) return { ok: false, reason: 'max level' };
+  const cost = def.costs[level];
+  if (save.energy < cost) return { ok: false, reason: `need ${cost} energy` };
+  save.energy -= cost;
+  save.upgrades[id] = level + 1;
+  return { ok: true, cost, level: level + 1 };
+}
+
+// Best-distance gates (unlock chain): track 1 is always open. Track
+// N opens when the best distance on track N-1 reaches half its length
+// — pushing halfway down a track earns the next one. A track with any
+// recorded best was flown before the chain existed, so it stays open
+// (grandfathered): old saves never lose a track.
+export const UNLOCK_FRACTION = 0.5;
+export function isTrackUnlocked(save, trackId) {
+  if (trackId <= 1) return true;
+  const prev = trackById(trackId - 1);
+  if (!prev) return false;
+  if (save.best[trackId]) return true; // grandfathered: flown before
+  const best = save.best[trackId - 1];
+  return !!best && best.distance >= prev.length * UNLOCK_FRACTION;
+}
+
+// Time Trial medals: par is the greedy bot's completion time for the
+// track (see the par values on each track). Gold means out-flying the
+// bot — a clean run with smart boost use; silver and bronze are
+// reachable on a good first attempt. Upgrades help: a faster ship
+// earns faster times, so the economy and the mode feed each other.
+export const MEDAL_MULT = { gold: 0.98, silver: 1.15, bronze: 1.35 };
+export function medalForTime(track, seconds) {
+  if (!track || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds <= track.par * MEDAL_MULT.gold) return 'gold';
+  if (seconds <= track.par * MEDAL_MULT.silver) return 'silver';
+  if (seconds <= track.par * MEDAL_MULT.bronze) return 'bronze';
+  return null;
+}
+
 // --- tracks ---
 // A track is hand-authored as a list of segments. Each segment expands
 // deterministically into entities, so the track is dense by construction
@@ -94,7 +187,7 @@ export const TRACKS = [
   {
     id: 1, name: 'First Light', seed: 101,
     hint: 'Follow the gates. The tunnel teaches; it does not punish.',
-    length: 1300, baseSpeed: 13, maxSpeed: 24,
+    length: 1300, par: 68, baseSpeed: 13, maxSpeed: 24,
     theme: { ring: '#22d3ee', glow: '#0e7490', accent: '#f472b6', disc: '#0b1030', tint: '#67e8f9' },
     segments: [
       { at: 60, len: 140, type: 'gates', count: 3, amp: 3 },
@@ -109,7 +202,7 @@ export const TRACKS = [
   {
     id: 2, name: 'Violet Spiral', seed: 202,
     hint: 'The spiral tightens. Bank early, cut the corners late.',
-    length: 1500, baseSpeed: 14, maxSpeed: 27,
+    length: 1500, par: 72, baseSpeed: 14, maxSpeed: 27,
     theme: { ring: '#a78bfa', glow: '#6d28d9', accent: '#f472b6', disc: '#150b30', tint: '#c4b5fd' },
     segments: [
       { at: 60, len: 140, type: 'gates', count: 3, amp: 3.5 },
@@ -125,7 +218,7 @@ export const TRACKS = [
   {
     id: 3, name: 'Gold Rush', seed: 303,
     hint: 'Cells pay for the run. Chase the gold line, not the centre.',
-    length: 1600, baseSpeed: 15, maxSpeed: 28,
+    length: 1600, par: 71, baseSpeed: 15, maxSpeed: 28,
     theme: { ring: '#fbbf24', glow: '#b45309', accent: '#22d3ee', disc: '#1c1206', tint: '#fde68a' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 4 },
@@ -141,7 +234,7 @@ export const TRACKS = [
   {
     id: 4, name: 'Crimson Gauntlet', seed: 404,
     hint: 'No free centre line here. Pick a lane and commit to it.',
-    length: 1800, baseSpeed: 16, maxSpeed: 30,
+    length: 1800, par: 76, baseSpeed: 16, maxSpeed: 30,
     theme: { ring: '#f87171', glow: '#b91c1c', accent: '#f472b6', disc: '#260808', tint: '#fca5a5' },
     segments: [
       { at: 60, len: 140, type: 'gates', count: 3, amp: 4 },
@@ -158,7 +251,7 @@ export const TRACKS = [
   {
     id: 5, name: 'Nebula Weave', seed: 505,
     hint: 'The walls move. Watch the gap, not the wall.',
-    length: 1900, baseSpeed: 17, maxSpeed: 31,
+    length: 1900, par: 75, baseSpeed: 17, maxSpeed: 31,
     theme: { ring: '#2dd4bf', glow: '#0f766e', accent: '#a78bfa', disc: '#06231f', tint: '#99f6e4' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 4.5 },
@@ -175,7 +268,7 @@ export const TRACKS = [
   {
     id: 6, name: 'Event Horizon', seed: 606,
     hint: 'Everything you learned, at full speed. There is no centre.',
-    length: 2100, baseSpeed: 18, maxSpeed: 33,
+    length: 2100, par: 79, baseSpeed: 18, maxSpeed: 33,
     theme: { ring: '#f8fafc', glow: '#7c3aed', accent: '#fbbf24', disc: '#12081f', tint: '#e9d5ff' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 5 },
@@ -193,7 +286,7 @@ export const TRACKS = [
   {
     id: 7, name: 'Solar Flare', seed: 707,
     hint: 'The gates start to orbit. Fly the circle, not the line.',
-    length: 2300, baseSpeed: 19, maxSpeed: 34,
+    length: 2300, par: 79, baseSpeed: 19, maxSpeed: 34,
     theme: { ring: '#fb923c', glow: '#c2410c', accent: '#facc15', disc: '#1f0d02', tint: '#fed7aa' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 4 },
@@ -211,7 +304,7 @@ export const TRACKS = [
   {
     id: 8, name: 'Emerald Rush', seed: 808,
     hint: 'Walls everywhere. Watch the gap slide, then commit.',
-    length: 2500, baseSpeed: 20, maxSpeed: 35,
+    length: 2500, par: 81, baseSpeed: 20, maxSpeed: 35,
     theme: { ring: '#4ade80', glow: '#15803d', accent: '#22d3ee', disc: '#04170c', tint: '#bbf7d0' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 4.5 },
@@ -230,7 +323,7 @@ export const TRACKS = [
   {
     id: 9, name: 'Rose Nebula', seed: 909,
     hint: 'Minefields with a corridor — find it, then orbit out.',
-    length: 2700, baseSpeed: 21, maxSpeed: 36,
+    length: 2700, par: 84, baseSpeed: 21, maxSpeed: 36,
     theme: { ring: '#f9a8d4', glow: '#be185d', accent: '#a78bfa', disc: '#22081a', tint: '#fbcfe8' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 4.5 },
@@ -249,7 +342,7 @@ export const TRACKS = [
   {
     id: 10, name: 'Azure Deep', seed: 1010,
     hint: 'Gauntlets back to back. There is no breather here.',
-    length: 2900, baseSpeed: 22, maxSpeed: 37,
+    length: 2900, par: 88, baseSpeed: 22, maxSpeed: 37,
     theme: { ring: '#60a5fa', glow: '#1d4ed8', accent: '#f472b6', disc: '#061224', tint: '#bfdbfe' },
     segments: [
       { at: 60, len: 160, type: 'gates', count: 4, amp: 5 },
@@ -269,7 +362,7 @@ export const TRACKS = [
   {
     id: 11, name: 'Acid Rain', seed: 1111,
     hint: 'Orbit, slalom, orbit. The tunnel never flies straight.',
-    length: 3100, baseSpeed: 23, maxSpeed: 38,
+    length: 3100, par: 90, baseSpeed: 23, maxSpeed: 38,
     theme: { ring: '#a3e635', glow: '#4d7c0f', accent: '#f472b6', disc: '#101a04', tint: '#d9f99d' },
     segments: [
       { at: 60, len: 200, type: 'spiral', count: 5, amp: 5 },
@@ -290,7 +383,7 @@ export const TRACKS = [
   {
     id: 12, name: 'Void Crown', seed: 1212,
     hint: 'Everything you learned, at full speed. Earn the crown.',
-    length: 3300, baseSpeed: 24, maxSpeed: 39,
+    length: 3300, par: 91, baseSpeed: 24, maxSpeed: 39,
     theme: { ring: '#e879f9', glow: '#a21caf', accent: '#fbbf24', disc: '#1e0424', tint: '#f5d0fe' },
     segments: [
       { at: 60, len: 180, type: 'gates', count: 4, amp: 5 },
@@ -417,16 +510,25 @@ export function barrierGapAt(entity, t) {
 }
 
 // --- run state ---
-export function createRun(track) {
+// opts: { mode: 'campaign' | 'timetrial', upgrades: { thrusters, plating, tank } }.
+// Upgrades apply to the run's speeds, stun and boost tank; Time Trial
+// is the same flight with the clock as the score — the run ends the
+// same way, but a finish records a time and a medal.
+export function createRun(track, opts = {}) {
   const built = buildTrack(track);
+  const eff = upgradeEffect(opts.upgrades);
+  const mode = opts.mode === 'timetrial' ? 'timetrial' : 'campaign';
   return {
     track, entities: built.entities,
+    mode, upgrades: opts.upgrades || { thrusters: 0, plating: 0, tank: 0 },
+    eff,
     z: 0, x: 0, y: 0, vx: 0, vy: 0,
-    speed: track.baseSpeed * 0.6, // start slow; the opening teaches
+    speed: (track.baseSpeed + eff.baseSpeedBonus) * 0.6, // start slow; the opening teaches
     time: 0, distance: 0,
-    shields: SHIELDS, score: 0,
-    boost: BOOST_MAX, boosting: false,
-    stun: 0, invuln: 0, boostBurst: 0,
+    shields: SHIELDS + eff.extraShields, maxShields: SHIELDS + eff.extraShields,
+    score: 0, energy: 0, distGates: [false, false, false, false],
+    boost: eff.boostMax, boostMax: eff.boostMax, boosting: false,
+    stun: 0, stunSeconds: STUN_SECONDS * eff.stunMult, invuln: 0, boostBurst: 0,
     gatesHit: 0, cellsHit: 0, nearMisses: 0, hitsTaken: 0,
     done: false, reason: null, // 'complete' | 'runOver'
     nextEntity: 0,
@@ -434,9 +536,9 @@ export function createRun(track) {
 }
 
 function targetSpeed(run) {
-  const ramp = Math.min(run.track.maxSpeed - run.track.baseSpeed,
+  const ramp = Math.min(run.track.maxSpeed + run.eff.maxSpeedBonus - (run.track.baseSpeed + run.eff.baseSpeedBonus),
     run.distance * 0.008);
-  let s = run.track.baseSpeed + ramp + run.boostBurst;
+  let s = run.track.baseSpeed + run.eff.baseSpeedBonus + ramp + run.boostBurst;
   if (run.boosting) s *= BOOST_MULT;
   return s;
 }
@@ -474,7 +576,7 @@ export function stepRun(run, input, dt = DT) {
   if (wantBoost && !run.boosting) events.push({ type: 'boostStart' });
   run.boosting = wantBoost;
   if (wantBoost) run.boost = Math.max(0, run.boost - BOOST_DRAIN * dt);
-  else run.boost = Math.min(BOOST_MAX, run.boost + BOOST_REFILL * dt);
+  else run.boost = Math.min(run.boostMax, run.boost + BOOST_REFILL * dt);
   run.boostBurst = Math.max(0, run.boostBurst - 6 * dt);
 
   // Forward speed eases toward its target (ramps up with distance).
@@ -486,6 +588,16 @@ export function stepRun(run, input, dt = DT) {
   run.distance = run.z;
   run.score = Math.floor(run.distance) + run.gatesHit * GATE_SCORE
     + run.cellsHit * CELL_SCORE + run.nearMisses * NEAR_MISS_SCORE;
+
+  // Distance gates: crossing 25/50/75/100% of the track banks energy.
+  // The 100% gate fires just before the completion event below.
+  for (let g = 0; g < DIST_GATE_FRACTIONS.length; g++) {
+    if (!run.distGates[g] && run.z >= run.track.length * DIST_GATE_FRACTIONS[g]) {
+      run.distGates[g] = true;
+      run.energy += ENERGY_DIST_GATE;
+      events.push({ type: 'distGate', fraction: DIST_GATE_FRACTIONS[g], energy: ENERGY_DIST_GATE });
+    }
+  }
 
   if (run.stun > 0) run.stun -= dt;
   if (run.invuln > 0) run.invuln -= dt;
@@ -504,13 +616,15 @@ export function stepRun(run, input, dt = DT) {
     if (e.kind === 'cell') {
       if (Math.hypot(cx - e.x, cy - e.y) < e.r + SHIP_RADIUS + 0.5) {
         run.cellsHit++;
+        run.energy += ENERGY_CELL;
         events.push({ type: 'collect', x: e.x, y: e.y, z: e.z });
       }
     } else if (e.kind === 'gate') {
       const d = Math.hypot(cx - e.x, cy - e.y);
       if (d < e.r - 0.2) {
         run.gatesHit++;
-        run.boost = Math.min(BOOST_MAX, run.boost + GATE_BOOST_REFILL);
+        run.energy += ENERGY_GATE;
+        run.boost = Math.min(run.boostMax, run.boost + GATE_BOOST_REFILL);
         run.boostBurst = Math.min(6, run.boostBurst + 3.5);
         events.push({ type: 'gate', x: e.x, y: e.y, z: e.z });
       } else if (d < e.r + 1.4) {
@@ -542,7 +656,7 @@ export function stepRun(run, input, dt = DT) {
       if (hit && run.invuln <= 0) {
         run.shields--;
         run.hitsTaken++;
-        run.stun = STUN_SECONDS;
+        run.stun = run.stunSeconds;
         run.invuln = INVULN_SECONDS;
         run.speed *= 0.55;
         run.boostBurst = 0;
@@ -640,8 +754,10 @@ export function greedyPolicy(run) {
 }
 
 // Simulate a whole run with a policy function. Returns the outcome.
+// opts passes through to createRun (mode, upgrades) — the bot plays
+// upgraded runs the same way, through the same public hooks.
 export function simulateRun(track, policy, opts = {}) {
-  const run = createRun(track);
+  const run = createRun(track, opts);
   const maxSteps = Math.ceil((track.length / track.baseSpeed + 60) / DT);
   let steps = 0;
   const events = [];
@@ -654,7 +770,7 @@ export function simulateRun(track, policy, opts = {}) {
   return {
     completed: run.done && run.reason === 'complete',
     reason: run.reason || (steps >= maxSteps ? 'timeout' : 'running'),
-    distance: run.distance, score: run.score,
+    distance: run.distance, score: run.score, energy: run.energy,
     shields: run.shields, gatesHit: run.gatesHit, cellsHit: run.cellsHit,
     nearMisses: run.nearMisses, hitsTaken: run.hitsTaken,
     time: run.time, steps,
@@ -663,7 +779,11 @@ export function simulateRun(track, policy, opts = {}) {
 
 // --- save (localStorage) ---
 export function defaultSave() {
-  return { version: SAVE_VERSION, best: {}, totalRuns: 0, muted: false, shake: 1 };
+  return {
+    version: SAVE_VERSION, best: {}, bestTime: {},
+    energy: 0, upgrades: { thrusters: 0, plating: 0, tank: 0 },
+    totalRuns: 0, muted: false, shake: 1,
+  };
 }
 export function serializeSave(save) { return JSON.stringify(save); }
 export function parseSave(text) {
@@ -682,6 +802,22 @@ export function parseSave(text) {
         }
       }
     }
+    // M4: best Time Trial times (seconds, one decimal kept).
+    if (s.bestTime && typeof s.bestTime === 'object') {
+      for (const [k, v] of Object.entries(s.bestTime)) {
+        if (/^(?:[1-9]|1[0-2])$/.test(k) && Number.isFinite(v)) {
+          d.bestTime[k] = clamp(v, 0, 10000);
+        }
+      }
+    }
+    if (Number.isInteger(s.energy)) d.energy = clamp(s.energy, 0, 1000000);
+    if (s.upgrades && typeof s.upgrades === 'object') {
+      for (const id of Object.keys(UPGRADE_DEFS)) {
+        if (Number.isInteger(s.upgrades[id])) {
+          d.upgrades[id] = clamp(s.upgrades[id], 0, UPGRADE_DEFS[id].maxLevel);
+        }
+      }
+    }
     if (Number.isInteger(s.totalRuns)) d.totalRuns = clamp(s.totalRuns, 0, 100000);
     if (typeof s.muted === 'boolean') d.muted = s.muted;
     if (typeof s.shake === 'number' && Number.isFinite(s.shake)) d.shake = clamp(s.shake, 0, 1);
@@ -693,4 +829,12 @@ export function recordBest(save, trackId, distance, score) {
   const best = { distance: Math.max(prev ? prev.distance : 0, Math.floor(distance)), score: Math.max(prev ? prev.score : 0, score) };
   save.best[trackId] = best;
   return best;
+}
+// Time Trial: keep the fastest finish per track. Returns the best time
+// and whether this run set it.
+export function recordBestTime(save, trackId, seconds) {
+  const prev = save.bestTime[trackId];
+  const isBest = prev === undefined || seconds < prev;
+  if (isBest) save.bestTime[trackId] = Math.round(seconds * 10) / 10;
+  return { time: save.bestTime[trackId], isBest };
 }

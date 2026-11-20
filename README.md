@@ -9,7 +9,7 @@ track to complete it. Score comes from distance, gates and cells — your
 best distance is saved per track.
 
 **Live:** https://namdev-muse.github.io/neon-drift/
-**Version:** v0.3.0 (M3 feel & juice)
+**Version:** v0.4.0 (M4 progression & depth)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
@@ -19,7 +19,20 @@ Real captures from a headless-Chromium run of the game
 
 ![Main menu over the live 3D attract scene](docs/screenshots/menu.png)
 ![Mid-run on First Light — the ship banks through the tunnel](docs/screenshots/gameplay.png)
+![Ship upgrades — spend banked energy on thrusters, plating, boost tank](docs/screenshots/upgrades.png)
 ![Run over — best distance saved](docs/screenshots/runover.png)
+
+## Progression: a reason to fly again
+
+Every run banks **energy** — cells +2, gates +3, and +10 each time you
+cross a quarter of the track — and energy buys **ship upgrades**:
+Thrusters (+1 base / +2 top speed per level), Plating (shorter stun,
+a 4th shield at level 3), Boost Tank (+25 capacity per level). A full
+set costs 595 energy — about one campaign playthrough — so upgrades
+feel earned. Tracks unlock down the chain: fly halfway down one track
+to open the next. And **Time Trial** races each track against its par
+time (the bot's time) for gold, silver and bronze medals — a faster
+ship earns faster times, so the economy and the mode feed each other.
 
 ## The core: steering is the skill
 
@@ -82,9 +95,9 @@ settings; every effect decays back to its exact rest state.
 
 ## Tests
 
-- `npm run smoke` — 312 physics checks (tracks, steering, boost, gates, cells, hits, save, feedback tiers + layer bundles, anti-slop gate)
+- `npm run smoke` — 394 physics checks (tracks, steering, boost, gates, cells, hits, save, feedback tiers + layer bundles, anti-slop gate, M4 energy economy, upgrades, unlock chain, Time Trial medals)
 - `npm test` — smoke + bot (steering bot completes all 12 tracks; holding centre fails all 12)
-- `npm run render-check` — headless Chromium: menu over the live 3D scene, steering, gates, cells, shield loss, run-over, pause, restart, plus the M3 juice assertions (score pops, music sequencer, FOV pulse, shake toggle, reduce-flashing, exact rest state), zero console errors
+- `npm run render-check` — headless Chromium: menu over the live 3D scene, steering, gates, cells, shield loss, run-over, pause, restart, plus the M3 juice assertions (score pops, music sequencer, FOV pulse, shake toggle, reduce-flashing, exact rest state) and the M4 assertions (track locks, mode toggle, upgrades purchase through the UI, a full Time Trial completion with medal + banked energy + unlock), zero console errors
 - `npm run screenshots` — README captures + 3-resolution size sweep (1280x720, 2560x1080, 1080x2340), inspected by eye
 
 ## Devlog

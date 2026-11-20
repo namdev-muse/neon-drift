@@ -29,6 +29,8 @@
     <span id="hud-score">Score 0</span>
     <span id="hud-distance">0 m</span>
     <span id="hud-speed">0 u/s</span>
+    <span id="hud-energy">⚡ 0</span>
+    <span id="hud-time" class="hidden">0:00.0</span>
   </div>
   <div class="hud-right">
     <div id="hud-boost" class="hud-boost" aria-label="Boost meter">
@@ -49,10 +51,16 @@
     <h1>NEON DRIFT</h1>
     <p class="tagline">Steer the ship. Thread the gates. Outrun the tunnel.</p>
     <div class="menu-col menu-actions">
+      <div class="mode-toggle" role="group" aria-label="Game mode">
+        <button id="btn-mode-campaign" class="btn small mode-btn active" type="button" aria-pressed="true">Campaign</button>
+        <button id="btn-mode-timetrial" class="btn small mode-btn" type="button" aria-pressed="false">Time Trial</button>
+      </div>
       <button id="btn-play" class="btn primary" type="button">Play</button>
+      <button id="btn-upgrades" class="btn" type="button">Upgrades</button>
       <button id="btn-howto" class="btn" type="button">How to Play</button>
       <button id="btn-settings" class="btn" type="button">Settings</button>
       <button id="btn-mute-menu" class="btn small" type="button">Sound: On</button>
+      <p id="menu-energy" class="menu-energy"></p>
       <p id="menu-best" class="menu-best"></p>
     </div>
     <div class="menu-col menu-setup">
@@ -74,6 +82,8 @@
       <li><strong>Hold Space</strong> (or the Boost button on touch) to burn boost — it drains the meter, so spend it where the tunnel is clear.</li>
       <li>You have <strong>3 shields</strong>. A hit costs one and stuns the ship; lose all three and the run ends. Reach the end of the track to complete it.</li>
       <li>Score comes from distance, gates and cells. Your <strong>best distance</strong> is saved per track — beat it.</li>
+      <li>Cells, gates and distance gates bank <strong>energy</strong> — spend it on ship <strong>upgrades</strong> (faster thrusters, tougher plating, a bigger boost tank) from the main menu.</li>
+      <li>Fly halfway down a track to <strong>unlock the next one</strong>. In <strong>Time Trial</strong>, race the par time — beat it for a gold medal.</li>
     </ul>
     <h3>Controls</h3>
     <ul class="howto-list">
@@ -82,6 +92,16 @@
       <li>Esc closes a panel &middot; Enter confirms on menus</li>
     </ul>
     <button id="btn-howto-close" class="btn primary" type="button">Got it</button>
+  </div>
+</div>
+
+<!-- Upgrades -->
+<div id="upgrades" class="overlay hidden">
+  <div class="panel">
+    <h2>Ship Upgrades</h2>
+    <p id="upgrades-energy" class="upgrades-energy"></p>
+    <div id="upgrades-list" class="upgrades-list"></div>
+    <button id="btn-upgrades-close" class="btn primary" type="button">Back to Menu</button>
   </div>
 </div>
 
@@ -115,8 +135,11 @@
   <div class="panel">
     <h2>Track Complete</h2>
     <p id="complete-score" class="big-score">Score 0</p>
+    <p id="complete-medal" class="complete-medal"></p>
     <p id="complete-detail"></p>
     <p id="complete-best" class="complete-best"></p>
+    <p id="complete-energy" class="complete-best"></p>
+    <p id="complete-unlock" class="complete-unlock"></p>
     <button id="btn-next" class="btn primary" type="button">Next Track</button>
     <button id="btn-replay" class="btn" type="button">Fly Again</button>
     <button id="btn-menu-complete" class="btn" type="button">Main Menu</button>
@@ -130,6 +153,7 @@
     <p id="runover-text">The tunnel wins this time.</p>
     <p id="runover-stats" class="runover-stats"></p>
     <p id="runover-best" class="complete-best"></p>
+    <p id="runover-energy" class="complete-best"></p>
     <button id="btn-retry" class="btn primary" type="button">Fly Again</button>
     <button id="btn-menu-runover" class="btn" type="button">Main Menu</button>
   </div>

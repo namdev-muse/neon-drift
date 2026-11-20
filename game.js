@@ -1,4 +1,4 @@
-// Neon Drift v0.3.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
+// Neon Drift v0.4.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
 // The ship auto-flies forward through a neon tunnel; the player steers in
 // the cross-section with momentum and banking. Dodge blocks, mines and
 // moving barrier walls; thread magenta boost gates; collect gold energy
@@ -6,11 +6,18 @@
 // run ends. Score from distance + gates + cells; best distance saved per
 // track. No assist of any kind: no auto-steer, no oracle, no line that
 // plays for you — steering is the skill.
+//
+// M4 — progression & depth: energy is banked every run (cells +2, gates
+// +3, distance gates +10) and spent on ship upgrades (Thrusters /
+// Plating / Boost Tank); tracks unlock down the chain at 50% best
+// distance; Time Trial mode races the par time for gold/silver/bronze.
 import * as THREE from 'three';
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
-  greedyPolicy, clamp, TUNNEL_RADIUS, SHIP_RADIUS, SHIELDS, BOOST_MAX,
+  greedyPolicy, clamp, TUNNEL_RADIUS, SHIP_RADIUS, BOOST_MAX,
   FEEDBACK, DT, defaultSave, serializeSave, parseSave, recordBest,
+  UPGRADE_DEFS, buyUpgrade, isTrackUnlocked, medalForTime, recordBestTime,
+  MEDAL_MULT,
 } from './physics.js';
 
 const SAVE_KEY = 'neon-drift-save-v1';
@@ -404,6 +411,7 @@ function stopMusicSequencer() {
 
 // --- game state ---
 let phase = 'menu'; // menu | run | paused | complete | runover
+let mode = 'campaign'; // campaign | timetrial — Time Trial races the par time
 let selectedTrackId = 1;
 let track = TRACKS[0];
 let run = null;
@@ -508,7 +516,7 @@ function unloadTrackMeshes() {
 }
 
 // --- screens (stack, not boolean soup) ---
-const OVERLAYS = ['menu', 'howto', 'settings', 'complete', 'runover', 'pause'];
+const OVERLAYS = ['menu', 'howto', 'settings', 'upgrades', 'complete', 'runover', 'pause'];
 function showOverlay(id) {
   for (const o of OVERLAYS) $(o).classList.add('hidden');
   if (id) {
@@ -537,18 +545,32 @@ function announce(text) {
 }
 
 // --- HUD ---
+// Times format as m:ss.d (Time Trial) — one decimal is all a race needs.
+function fmtTime(s) {
+  if (!Number.isFinite(s) || s < 0) return '—';
+  const m = Math.floor(s / 60);
+  const sec = s - m * 60;
+  return `${m}:${sec.toFixed(1).padStart(4, '0')}`;
+}
 function updateHUD() {
   if (!run) return;
   $('hud-track').textContent = `Track ${track.id} — ${track.name}`;
   let shields = '';
-  for (let i = 0; i < SHIELDS; i++) {
+  for (let i = 0; i < run.maxShields; i++) {
     shields += `<span class="${i < run.shields ? '' : 'shield-lost'}">◆</span>`;
   }
   $('hud-shields').innerHTML = shields;
   $('hud-score').textContent = `Score ${run.score}`;
   $('hud-distance').textContent = `${Math.floor(run.distance)} m / ${track.length} m`;
   $('hud-speed').textContent = `${Math.floor(run.speed)} u/s`;
-  $('boost-fill').style.width = `${Math.round((run.boost / BOOST_MAX) * 100)}%`;
+  $('hud-energy').textContent = `⚡ ${run.energy}`;
+  $('boost-fill').style.width = `${Math.round((run.boost / run.boostMax) * 100)}%`;
+  if (run.mode === 'timetrial') {
+    $('hud-time').classList.remove('hidden');
+    $('hud-time').textContent = `${fmtTime(run.time)} / GOLD ${fmtTime(track.par * MEDAL_MULT.gold)}`;
+  } else {
+    $('hud-time').classList.add('hidden');
+  }
 }
 function showToast(text, cls = '') {
   const el = $('hud-toast');
@@ -626,6 +648,16 @@ function handleEvent(ev) {
     spawnParticles(ev.x, ev.y, 0, 0xfbbf24, 18, 6);
     spawnPop('+100', ev.x, ev.y, 'pop-cell');
     glowPulse = Math.min(1, glowPulse + 0.4);
+  } else if (ev.type === 'distGate') {
+    // M4: a distance gate (25/50/75/100% of the track) banks +10
+    // energy — pushing further is always worth something, and the
+    // toast names the reward so the economy is legible in play.
+    applyFeedback('collect');
+    sfx.collect();
+    spawnParticles(run.x, run.y, 0, 0xfbbf24, 14, 5);
+    spawnPop('+10', run.x, run.y, 'pop-energy');
+    const pct = Math.round(ev.fraction * 100);
+    showToast(pct === 100 ? 'FINISH LINE — +10 ENERGY' : `${pct}% — +10 ENERGY`, 'toast-gate');
   } else if (ev.type === 'nearMiss') {
     applyFeedback('nearMiss');
     sfx.nearMiss();
@@ -668,25 +700,53 @@ function handleEvent(ev) {
 
 function finishRun(completed) {
   if (!run) return;
+  // Did this run unlock the next track? Capture BEFORE recordBest
+  // changes the best distance — the unlock is the news, not the state.
+  const nextId = track.id < TRACKS.length ? track.id + 1 : null;
+  const wasUnlockedNext = nextId ? isTrackUnlocked(save, nextId) : true;
   save.totalRuns++;
   const best = recordBest(save, track.id, run.distance, run.score);
+  save.energy += run.energy;
+  let medal = null, bestTime = null;
+  if (run.mode === 'timetrial' && completed) {
+    bestTime = recordBestTime(save, track.id, run.time);
+    medal = medalForTime(track, run.time);
+  }
   persistSave();
+  const unlockedNext = nextId ? isTrackUnlocked(save, nextId) : false;
   phase = completed ? 'complete' : 'runover';
   $('hud').classList.add('hidden');
   $('btn-boost').classList.add('hidden');
   if (completed) {
-    $('complete-score').textContent = `Score ${run.score}`;
-    $('complete-detail').textContent =
-      `${track.name} cleared in ${run.time.toFixed(1)}s — ${run.gatesHit} gates, ${run.cellsHit} cells, ${run.nearMisses} near-misses, ${run.hitsTaken} hit${run.hitsTaken === 1 ? '' : 's'}.`;
+    if (run.mode === 'timetrial') {
+      $('complete-score').textContent = `Time ${fmtTime(run.time)}`;
+      const medalText = medal
+        ? `${medal.toUpperCase()} MEDAL — par ${fmtTime(track.par)}`
+        : `No medal — gold is ${fmtTime(track.par * MEDAL_MULT.gold)}`;
+      $('complete-medal').textContent = bestTime.isBest
+        ? `${medalText} · New best time!` : `${medalText} · Best ${fmtTime(bestTime.time)}`;
+      $('complete-detail').textContent =
+        `${track.name} cleared in ${fmtTime(run.time)} — ${run.gatesHit} gates, ${run.cellsHit} cells, ${run.nearMisses} near-misses, ${run.hitsTaken} hit${run.hitsTaken === 1 ? '' : 's'}.`;
+    } else {
+      $('complete-score').textContent = `Score ${run.score}`;
+      $('complete-medal').textContent = '';
+      $('complete-detail').textContent =
+        `${track.name} cleared in ${run.time.toFixed(1)}s — ${run.gatesHit} gates, ${run.cellsHit} cells, ${run.nearMisses} near-misses, ${run.hitsTaken} hit${run.hitsTaken === 1 ? '' : 's'}.`;
+    }
     $('complete-best').textContent = `Best distance: ${Math.floor(best.distance)} m · Best score: ${best.score}`;
+    $('complete-energy').textContent = `Banked ${run.energy} energy · Balance ${save.energy}`;
+    $('complete-unlock').textContent = (!wasUnlockedNext && unlockedNext)
+      ? `Track ${nextId} — ${trackById(nextId).name} unlocked!` : '';
     $('btn-next').textContent = track.id < TRACKS.length ? 'Next Track' : 'Back to Track 1';
     resetScreens('complete');
-    announce(`Track complete. Score ${run.score}.`);
+    announce(`Track complete. ${run.mode === 'timetrial' ? `Time ${fmtTime(run.time)}${medal ? `, ${medal} medal` : ''}.` : `Score ${run.score}.`}`);
   } else {
     $('runover-text').textContent = `The tunnel wins this time — ${Math.floor(run.distance)} m of ${track.length} m.`;
     $('runover-stats').textContent =
-      `Score ${run.score} · ${run.gatesHit} gates · ${run.cellsHit} cells · ${run.nearMisses} near-misses`;
+      `Score ${run.score} · ${run.gatesHit} gates · ${run.cellsHit} cells · ${run.nearMisses} near-misses`
+      + (run.mode === 'timetrial' ? ` · Survived ${fmtTime(run.time)} — finish the track to set a time` : '');
     $('runover-best').textContent = `Best distance: ${Math.floor(best.distance)} m · Best score: ${best.score}`;
+    $('runover-energy').textContent = `Banked ${run.energy} energy · Balance ${save.energy}`;
     resetScreens('runover');
     announce(`Ship down at ${Math.floor(run.distance)} metres.`);
   }
@@ -694,11 +754,20 @@ function finishRun(completed) {
 }
 
 // --- run control ---
-function startRun(trackId) {
+// A locked track cannot start: the menu never selects one, but the
+// guard keeps the hook honest too (and tells the player why).
+function startRun(trackId, modeOverride) {
   const t = trackById(trackId) || TRACKS[0];
+  const runMode = modeOverride || mode;
+  if (!isTrackUnlocked(save, t.id)) {
+    const prev = trackById(t.id - 1);
+    $('track-hint').textContent = `Locked — fly ${Math.floor(prev.length * 0.5)} m on ${prev.name} to unlock ${t.name}.`;
+    announce(`${t.name} is locked.`);
+    return false;
+  }
   selectedTrackId = t.id;
   loadTrackMeshes(t);
-  run = createRun(t);
+  run = createRun(t, { mode: runMode, upgrades: save.upgrades });
   demoRun = null;
   autoPilot = false;
   hookSteer = null;
@@ -718,7 +787,10 @@ function startRun(trackId) {
   spawnParticles(0, 0, -1.2, 0x22d3ee, 20, 6, 0.6);
   updateHUD();
   refreshTrackSelect();
-  announce(`Track ${t.id}, ${t.name}. Steer with drag or arrow keys.`);
+  announce(runMode === 'timetrial'
+    ? `Time trial, track ${t.id}, ${t.name}. Beat ${fmtTime(t.par * MEDAL_MULT.gold)} for gold.`
+    : `Track ${t.id}, ${t.name}. Steer with drag or arrow keys.`);
+  return true;
 }
 function restartRun() {
   if (track) startRun(track.id);
@@ -847,20 +919,50 @@ boostBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); ensureAudi
 boostBtn.addEventListener('pointerup', () => { boostHeld = false; });
 boostBtn.addEventListener('pointerleave', () => { boostHeld = false; });
 
-// --- menu: track select ---
+// --- menu: mode + track select ---
+function setMode(next) {
+  mode = next === 'timetrial' ? 'timetrial' : 'campaign';
+  $('btn-mode-campaign').classList.toggle('active', mode === 'campaign');
+  $('btn-mode-timetrial').classList.toggle('active', mode === 'timetrial');
+  $('btn-mode-campaign').setAttribute('aria-pressed', String(mode === 'campaign'));
+  $('btn-mode-timetrial').setAttribute('aria-pressed', String(mode === 'timetrial'));
+  $('btn-play').textContent = mode === 'timetrial' ? 'Race' : 'Play';
+  refreshTrackSelect();
+}
+function fmtMedal(m) { return m ? m.toUpperCase() : null; }
 function refreshTrackSelect() {
   const el = $('track-select');
   el.innerHTML = '';
   for (const t of TRACKS) {
     const best = save.best[t.id];
+    const unlocked = isTrackUnlocked(save, t.id);
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = `track-card${t.id === selectedTrackId ? ' selected' : ''}`;
+    card.className = `track-card${t.id === selectedTrackId ? ' selected' : ''}${unlocked ? '' : ' locked'}`;
     card.style.setProperty('--tc', t.theme.ring);
-    card.innerHTML = `<div class="track-name">${t.id}. ${t.name}</div>`
-      + `<div class="track-meta">${t.length} m · top speed ${t.maxSpeed} u/s</div>`
-      + `<div class="track-best">${best ? `Best ${Math.floor(best.distance)} m · ${best.score} pts` : 'Not flown yet'}</div>`;
+    let bestLine;
+    if (!unlocked) {
+      const prev = trackById(t.id - 1);
+      bestLine = `Fly ${Math.floor(prev.length * 0.5)} m on ${prev.name}`;
+    } else if (mode === 'timetrial') {
+      const bt = save.bestTime[t.id];
+      const medal = bt ? medalForTime(t, bt) : null;
+      bestLine = bt
+        ? `Best ${fmtTime(bt)}${medal ? ` · ${fmtMedal(medal)}` : ''}`
+        : `Par ${fmtTime(t.par)} · Gold ${fmtTime(t.par * MEDAL_MULT.gold)}`;
+    } else {
+      bestLine = best ? `Best ${Math.floor(best.distance)} m · ${best.score} pts` : 'Not flown yet';
+    }
+    card.innerHTML = `<div class="track-name">${unlocked ? '' : '🔒 '}${t.id}. ${t.name}</div>`
+      + `<div class="track-meta">${t.length} m · ${t.maxSpeed} u/s</div>`
+      + `<div class="track-best">${bestLine}</div>`;
     card.addEventListener('click', () => {
+      if (!unlocked) {
+        // Locked cards still respond: they say what opens them.
+        const prev = trackById(t.id - 1);
+        $('track-hint').textContent = `Locked — fly ${Math.floor(prev.length * 0.5)} m on ${prev.name} to unlock ${t.name}.`;
+        return;
+      }
       selectedTrackId = t.id;
       $('track-hint').textContent = t.hint;
       refreshTrackSelect();
@@ -874,6 +976,55 @@ function refreshTrackSelect() {
   $('menu-best').textContent = flown
     ? `Flown ${flown} of ${TRACKS.length} tracks · ${save.totalRuns} run${save.totalRuns === 1 ? '' : 's'}`
     : '';
+  $('menu-energy').textContent = `⚡ ${save.energy} energy — spend it on upgrades`;
+}
+
+// --- upgrades screen (M4) ---
+// One row per line: name, what it does, level pips, and the Buy
+// button. A Buy that cannot happen still answers — it says why
+// ("Need 60 energy — you have 12" / "Max level") instead of sitting
+// dead. Buying re-renders the list and the menu balance immediately.
+function renderUpgrades() {
+  const el = $('upgrades-list');
+  el.innerHTML = '';
+  $('upgrades-energy').textContent = `⚡ ${save.energy} energy`;
+  for (const [id, def] of Object.entries(UPGRADE_DEFS)) {
+    const level = save.upgrades[id] || 0;
+    const maxed = level >= def.maxLevel;
+    const cost = maxed ? null : def.costs[level];
+    const row = document.createElement('div');
+    row.className = 'upgrade-row';
+    let pips = '';
+    for (let i = 0; i < def.maxLevel; i++) pips += i < level ? '●' : '○';
+    row.innerHTML = `<div class="upgrade-info">`
+      + `<div class="upgrade-name">${def.name} <span class="upgrade-pips" aria-label="level ${level} of ${def.maxLevel}">${pips}</span></div>`
+      + `<div class="upgrade-desc">${def.desc}</div></div>`;
+    const buy = document.createElement('button');
+    buy.type = 'button';
+    buy.className = 'btn small upgrade-buy';
+    buy.textContent = maxed ? 'MAXED' : `Buy — ${cost} ⚡`;
+    buy.addEventListener('click', () => {
+      ensureAudio();
+      const res = buyUpgrade(save, id);
+      if (res.ok) {
+        persistSave();
+        sfx.collect();
+        showToast(`${def.name} upgraded to level ${res.level}`, 'toast-gate');
+        announce(`${def.name} upgraded to level ${res.level}.`);
+        renderUpgrades();
+        refreshTrackSelect();
+      } else {
+        sfx.nearMiss();
+        const reason = res.reason === 'max level' ? 'Already max level.'
+          : `${res.reason} — you have ${save.energy}.`;
+        showToast(reason, 'toast-hit');
+        announce(reason);
+      }
+    });
+    buy.addEventListener('mouseenter', () => { if (audioCtx && sfxOn) sfx.tick(); });
+    row.appendChild(buy);
+    el.appendChild(row);
+  }
 }
 
 // --- mute / settings ---
@@ -950,6 +1101,10 @@ function nextTrack() {
   startRun(next);
 }
 wireButton('btn-play', () => startRun(selectedTrackId));
+wireButton('btn-mode-campaign', () => setMode('campaign'));
+wireButton('btn-mode-timetrial', () => setMode('timetrial'));
+wireButton('btn-upgrades', () => { renderUpgrades(); pushScreen('upgrades'); });
+wireButton('btn-upgrades-close', () => popScreen());
 wireButton('btn-howto', () => pushScreen('howto'));
 wireButton('btn-howto-close', () => popScreen());
 wireButton('btn-settings', () => pushScreen('settings'));
@@ -1052,7 +1207,13 @@ function updateScene(dt, now) {
     ship.visible = !(phase === 'run' && run.invuln > 0 && Math.floor(now / 90) % 2 === 0);
     if (boostOsc && boostGain) {
       boostGain.gain.value = phase === 'run' && run.boosting ? 0.05 : 0;
-      boostOsc.frequency.value = 80 + run.speed * 2;
+      // M4 fix: run is null in the menu (the attract flight is demoRun),
+      // so the hum follows the ACTIVE run — reading run.speed here threw
+      // every frame after quitting to menu and froze the attract scene.
+      // It went unnoticed through M3 because those checks quit to menu
+      // and ended within a frame; the M4 check's longer menu phase
+      // caught 771 of them.
+      boostOsc.frequency.value = 80 + (activeRun ? activeRun.speed : 12) * 2;
     }
   } else {
     ship.visible = false;
@@ -1168,6 +1329,7 @@ window.__drift = {
   get state() {
     return {
       phase,
+      mode,
       trackId: track ? track.id : null,
       selectedTrackId,
       shields: run ? run.shields : null,
@@ -1179,8 +1341,11 @@ window.__drift = {
   },
   tracks() {
     return TRACKS.map((t) => ({
-      id: t.id, name: t.name, length: t.length,
+      id: t.id, name: t.name, length: t.length, par: t.par,
       best: save.best[t.id] || null,
+      bestTime: save.bestTime[t.id] ?? null,
+      medal: save.bestTime[t.id] ? medalForTime(t, save.bestTime[t.id]) : null,
+      unlocked: isTrackUnlocked(save, t.id),
     }));
   },
   info() {
@@ -1195,9 +1360,13 @@ window.__drift = {
     });
     return {
       trackId: track.id, trackName: track.name, length: track.length,
-      shields: run.shields, score: run.score, distance: run.distance,
-      speed: run.speed, boost: run.boost, boosting: run.boosting,
-      time: run.time, gatesHit: run.gatesHit, cellsHit: run.cellsHit,
+      mode: run.mode, energy: run.energy, distGates: [...run.distGates],
+      shields: run.shields, maxShields: run.maxShields, score: run.score, distance: run.distance,
+      speed: run.speed, boost: run.boost, boostMax: run.boostMax, boosting: run.boosting,
+      time: run.time, par: track.par, goldTime: track.par * MEDAL_MULT.gold,
+      medal: run.done && run.mode === 'timetrial' && run.reason === 'complete'
+        ? medalForTime(track, run.time) : null,
+      gatesHit: run.gatesHit, cellsHit: run.cellsHit,
       nearMisses: run.nearMisses, hitsTaken: run.hitsTaken,
       ship: { x: run.x, y: run.y, vx: run.vx, vy: run.vy },
       // Screen position of the ship (pixels) — the chase camera looks
@@ -1232,11 +1401,24 @@ window.__drift = {
     return { ...s, ...(i ? { gatesHit: i.gatesHit, cellsHit: i.cellsHit, shields: i.shields } : {}) };
   },
   selectTrack(id) { selectedTrackId = id; refreshTrackSelect(); },
-  start(trackId) { startRun(trackId ?? selectedTrackId); },
+  start(trackId, modeOverride) { return startRun(trackId ?? selectedTrackId, modeOverride); },
   restart() { restartRun(); },
   pause() { pauseGame(); },
   resume() { resumeGame(); },
   quitToMenu() { quitToMenu(); },
+  // M4: mode + progression hooks (the render check drives these).
+  setMode(m) { setMode(m); },
+  get mode() { return mode; },
+  upgrades() { return { defs: UPGRADE_DEFS, levels: { ...save.upgrades }, energy: save.energy }; },
+  buyUpgrade(id) {
+    const res = buyUpgrade(save, id);
+    if (res.ok) { persistSave(); renderUpgrades(); refreshTrackSelect(); }
+    return res;
+  },
+  // Test hook: grant energy so the render check can buy an upgrade
+  // without flying a whole run first.
+  grantEnergy(n) { save.energy = Math.max(0, save.energy + (n | 0)); persistSave(); refreshTrackSelect(); return save.energy; },
+  unlocked(id) { return isTrackUnlocked(save, id); },
   setSteer(sx, sy, boost = false) { hookSteer = { sx, sy, boost }; },
   clearSteer() { hookSteer = null; },
   steerTo(x, y) { steerTarget = { x, y }; hookSteer = null; },

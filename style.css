@@ -109,7 +109,20 @@ h2 {
 
 .menu-col { display: flex; flex-direction: column; gap: 10px; }
 .menu-best { color: var(--gold); font-size: 0.95rem; margin: 4px 0 0; min-height: 1.2em; }
+.menu-energy { color: var(--gold); font-size: 0.95rem; margin: 0; min-height: 1.2em; }
 .track-hint { color: var(--muted); font-size: 0.95rem; margin: 2px 0 0; min-height: 2.4em; }
+
+/* --- M4: mode toggle (Campaign / Time Trial) ---
+   A segmented control, subordinate to Play: the two modes are equal
+   weight to each other, never equal to the primary action. */
+.mode-toggle { display: flex; gap: 8px; }
+.mode-btn { flex: 1; }
+.mode-btn.active {
+  background: rgba(251, 191, 36, 0.22);
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.3);
+}
 
 /* --- buttons: hover tick SFX + scale pop + press feedback (JS wires
      the tick; the pop is CSS so every button feels alive) --- */
@@ -194,9 +207,45 @@ h2 {
   background: rgba(251, 191, 36, 0.12);
   box-shadow: 0 0 16px rgba(251, 191, 36, 0.35);
 }
+/* M4: locked tracks are dimmed and show what opens them; they still
+   respond to a click (the requirement moves to the hint), so they are
+   never a dead button. */
+.track-card.locked { opacity: 0.55; }
+.track-card.locked .track-best { color: var(--muted); }
 .track-card .track-name { font-weight: 700; font-size: 1rem; }
 .track-card .track-meta { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
 .track-card .track-best { color: var(--gold); font-size: 0.82rem; margin-top: 2px; }
+
+/* --- M4: upgrades screen --- */
+.upgrades-energy {
+  color: var(--gold); font-weight: 700; font-size: 1.05rem; margin: 4px 0 14px;
+}
+.upgrades-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.upgrade-row {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(7, 8, 24, 0.6);
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 10px;
+  padding: 12px 14px;
+  text-align: left;
+}
+.upgrade-info { flex: 1; min-width: 0; }
+.upgrade-name { font-weight: 700; font-size: 1.05rem; }
+.upgrade-pips { color: var(--gold); letter-spacing: 0.2em; font-size: 0.85em; }
+.upgrade-desc { color: var(--muted); font-size: 0.9rem; margin-top: 3px; line-height: 1.45; }
+.upgrade-buy { flex-shrink: 0; white-space: nowrap; }
+
+/* --- M4: medal + unlock lines on the end screens --- */
+.complete-medal {
+  color: var(--gold); font-weight: 800; font-size: 1.15rem; letter-spacing: 0.06em;
+  text-shadow: 0 0 16px rgba(251, 191, 36, 0.6);
+  margin: 4px 0; min-height: 1.2em;
+}
+.complete-medal:empty { display: none; }
+.complete-unlock {
+  color: var(--cyan-bright); font-weight: 700; margin: 4px 0 10px; min-height: 1.2em;
+}
+.complete-unlock:empty { display: none; }
 
 /* --- HUD --- */
 #hud {
@@ -219,6 +268,8 @@ h2 {
 .hud-shields .shield-lost { color: rgba(148, 163, 184, 0.4); }
 #hud-score { font-weight: 700; }
 #hud-distance, #hud-speed { color: var(--muted); }
+#hud-energy { color: var(--gold); font-weight: 700; }
+#hud-time { color: var(--cyan-bright); font-weight: 700; font-variant-numeric: tabular-nums; }
 .hud-boost {
   position: relative;
   width: clamp(90px, 14vw, 160px); height: 20px;
@@ -274,6 +325,7 @@ h2 {
 .pop.pop-gate { color: var(--magenta); text-shadow: 0 0 14px rgba(244, 114, 182, 0.9), 0 2px 6px rgba(0, 0, 0, 0.9); }
 .pop.pop-cell { color: var(--gold); }
 .pop.pop-near { color: var(--cyan-bright); text-shadow: 0 0 14px rgba(103, 232, 249, 0.9), 0 2px 6px rgba(0, 0, 0, 0.9); }
+.pop.pop-energy { color: var(--gold); font-size: clamp(0.85rem, 2.2vmin, 1.3rem); }
 .pop.pop-big { font-size: clamp(1.6rem, 4.5vmin, 2.6rem); }
 @keyframes pop-rise {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
