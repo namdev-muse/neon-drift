@@ -1,5 +1,35 @@
 # Neon Drift — devlog
 
+## M4 — Progression & depth (v0.4.0) — 2026-11-21
+
+The campaign now has a reason to replay. Every run banks **energy**
+(cells +2, gates +3, +10 at each quarter of the track), and energy buys
+**ship upgrades** — Thrusters, Plating, Boost Tank, three tiers each
+(595 energy for the full set, about one campaign playthrough). Tracks
+unlock down a chain at 50% best distance, so pushing halfway down a
+track earns the next one; old saves keep every track they ever flew.
+And **Time Trial** races each track against its par time — the greedy
+bot's time, 68–91 s across the campaign — for gold (beat the bot),
+silver and bronze medals. The mode fits the steering core: it is the
+same flight, but boost management and clean lines are the whole game,
+and upgrades earn faster times, so the economy and the mode feed each
+other. A Daily track was considered and rejected: it would need a
+date-seeded generator and adds a calendar dependency without deepening
+steering; Time Trial deepens the one skill the game is about.
+
+**Tests:** smoke 394/394, bot 12/12 (plus the upgraded bot completes
+all 12 and centre still fails all 12 with max upgrades), render check
+PASS (zero console errors) including the new M4 assertions — track 2
+locked on a fresh profile, the locked card explains itself and never
+starts a run, the mode toggle relabels Play as Race, upgrades bought
+through the UI charge the right price and refuse unaffordable buys
+with a reason, and a full Time Trial run of track 1 ends with a medal,
+a saved best time, banked energy and track 2 unlocked. Size sweep
+inspected by eye at 1280x720, 2560x1080, 1080x2340, plus the upgrades
+screen at the phone size.
+
+**Playtest verdict:** (filled in after the real-browser playtest.)
+
 ## M1 — Core (v0.1.0) — 2026-11-21
 
 First milestone of the 12-hour sprint (game #4, second 3D game of the
