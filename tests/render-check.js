@@ -1,4 +1,4 @@
-// Neon Drift v0.2.1 — headless Chromium render check.
+// Neon Drift v0.3.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (attract flight actually
@@ -88,7 +88,7 @@ const playwrightPath = fileURLToPath(new URL('../../neon-hexfall/node_modules/pl
 const { chromium } = require(playwrightPath);
 const executablePath = findHeadlessShell();
 console.log('render-check: chromium executable:', executablePath || '(playwright default)');
-const launchArgs = ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const launchArgs = ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
 
 const errors = [];
 let browser;
@@ -125,8 +125,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.2.1') throw new Error(`expected version 0.2.1, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.1');
+  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -142,7 +142,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing');
-  if (menuText.includes('v0.2.1') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -257,6 +257,116 @@ try {
   console.log(`render-check: autopilot threads gates + collects cells (gates ${flown.gatesHit}, cells ${flown.cellsHit}, score ${flown.score}, ${flown.distance.toFixed(0)} m)`);
   await page.evaluate(() => window.__drift.autopilot(false));
 
+  // --- M3: feel & juice ---
+  // Score pops fire at the event: a +250 pop for the gate, +100 for
+  // the cell (pooled divs in #pops — the text stays in the node after
+  // the animation fades, so the check reads what last popped).
+  const popTexts = await page.evaluate(() => [...document.querySelectorAll('#pops .pop')].map((e) => e.textContent));
+  if (!popTexts.includes('+250')) throw new Error(`no +250 gate pop fired (pops seen: ${JSON.stringify(popTexts)})`);
+  if (!popTexts.includes('+100')) throw new Error(`no +100 cell pop fired (pops seen: ${JSON.stringify(popTexts)})`);
+  console.log('render-check: M3 score pops fire (+250 gate, +100 cell)');
+
+  // Music: the sequencer runs after the Play gesture and advances.
+  const audio0 = await page.evaluate(() => window.__drift.info().audio);
+  if (!audio0) throw new Error('no AudioContext after the Play gesture');
+  if (!audio0.music) throw new Error('music sequencer is not running');
+  await page.waitForTimeout(2500);
+  const audio1 = await page.evaluate(() => window.__drift.info().audio);
+  if (audio1.musicStep <= audio0.musicStep) throw new Error(`music sequencer did not advance (step ${audio0.musicStep} -> ${audio1.musicStep})`);
+  console.log(`render-check: M3 music sequencer running (state ${audio1.state}, step ${audio0.musicStep} -> ${audio1.musicStep})`);
+
+  // FOV pulse: boosting fires a pulse. (Poll every 50ms, not per
+  // frame — under swiftshader a frame is ~200ms and the pulse only
+  // lasts ~0.3s, so rAF polling could miss it entirely.)
+  await page.evaluate(() => window.__drift.setSteer(0, 0, true));
+  let pulseInfo = null;
+  try {
+    const h = await page.waitForFunction(() => {
+      const i = window.__drift.info();
+      return i.fovPulse > 0.3 ? i : false;
+    }, null, { timeout: 15000, polling: 50 });
+    pulseInfo = await h.jsonValue();
+  } finally {
+    await page.evaluate(() => window.__drift.clearSteer());
+  }
+  if (!pulseInfo) throw new Error('boost did not fire an FOV pulse');
+  console.log(`render-check: M3 boost fires an FOV pulse (fov ${pulseInfo.fov.toFixed(1)}, pulse ${pulseInfo.fovPulse.toFixed(2)})`);
+
+  // Shake toggle: with shake at 0, an event still adds trauma but the
+  // camera amplitude stays 0; at 100% it moves. Steer onto the next
+  // gate for each half; the info is captured atomically in-page the
+  // moment the gate lands, so the fast trauma decay cannot hide it.
+  async function nextGate() {
+    const started = Date.now();
+    for (;;) {
+      const g = await page.evaluate(() => {
+        const i = window.__drift.info();
+        if (!i) return null;
+        return i.upcoming.find((e) => e.kind === 'gate') || null;
+      });
+      if (g) return g;
+      if (Date.now() - started > 40000) throw new Error('no gate entered the upcoming window within 40s');
+      await page.waitForTimeout(500);
+    }
+  }
+  // Fresh run for the shake tests: the autopilot + boost legs above
+  // may already have cost shields, and each gate-steering leg can
+  // clip an obstacle on the way to its gate.
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => {
+    const i = window.__drift.info();
+    return window.__drift.state.phase === 'run' && i.shields === 3;
+  }, null, { timeout: 5000 });
+  async function gateWithShake(shake) {
+    await page.evaluate((s) => window.__drift.setShake(s), shake);
+    const g0 = await page.evaluate(() => window.__drift.info().gatesHit);
+    const gate = await nextGate();
+    await page.evaluate((g) => window.__drift.steerTo(g.x, g.y), gate);
+    const h = await page.waitForFunction((n) => {
+      const i = window.__drift.info();
+      if (i.done) return { done: true };
+      return (i.gatesHit > n && i.trauma > 0) ? i : false;
+    }, g0, { timeout: 30000, polling: 50 });
+    const after = await h.jsonValue();
+    await page.evaluate(() => window.__drift.clearTarget());
+    if (after.done) throw new Error('run ended during the shake-toggle gate test');
+    return after;
+  }
+  {
+    const after = await gateWithShake(0);
+    if (after.shakeAmp !== 0) throw new Error(`shake toggle at 0 must keep the camera still (shakeAmp ${after.shakeAmp})`);
+    console.log(`render-check: M3 shake 0% — trauma ${after.trauma.toFixed(2)} fires, camera still (shakeAmp 0)`);
+  }
+  {
+    const after = await gateWithShake(1);
+    if (!(after.shakeAmp > 0)) throw new Error('shake toggle at 100% must move the camera on a gate');
+    console.log(`render-check: M3 shake 100% — camera moves on a gate (shakeAmp ${after.shakeAmp.toFixed(3)})`);
+  }
+
+  // Rest state: fly straight (roll returns to level), then pause and
+  // let every layer settle — trauma, FOV, camera z and time scale must
+  // all return to their exact rest values.
+  await page.evaluate(() => window.__drift.setSteer(0, 0));
+  await page.waitForFunction(() => Math.abs(window.__drift.info().ship.vx) < 0.5, null, { timeout: 20000 });
+  await page.evaluate(() => window.__drift.clearSteer());
+  const rollNow = await page.evaluate(() => window.__drift.info().camRoll);
+  if (Math.abs(rollNow) > 0.01) throw new Error(`camera roll must return to level when flying straight (roll ${rollNow.toFixed(3)})`);
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => window.__drift.state.phase === 'paused', null, { timeout: 5000 });
+  await page.waitForTimeout(2500); // let trauma / pulses / knockback decay in real time
+  const rest = await page.evaluate(() => window.__drift.info());
+  const speedNorm = Math.min(1, Math.max(0, (rest.speed - 12) / 22));
+  const expectedFov = 72 + speedNorm * 10;
+  const expectedCamZ = -8.5 - speedNorm * 1.1;
+  if (rest.trauma > 0.05) throw new Error(`trauma must decay to rest (got ${rest.trauma.toFixed(2)})`);
+  if (rest.timeScale !== 1) throw new Error(`time scale must return to 1 (got ${rest.timeScale})`);
+  if (Math.abs(rest.fov - expectedFov) > 1) throw new Error(`FOV must return to its speed baseline ${expectedFov.toFixed(1)} (got ${rest.fov.toFixed(1)})`);
+  if (Math.abs(rest.camZ - expectedCamZ) > 0.15) throw new Error(`camera z must return to its rest ${expectedCamZ.toFixed(2)} (got ${rest.camZ.toFixed(2)})`);
+  if (Math.abs(rest.camRoll) > 0.01) throw new Error(`camera roll must return to 0 at rest (got ${rest.camRoll.toFixed(3)})`);
+  console.log(`render-check: M3 rest state — trauma ${rest.trauma.toFixed(2)}, timeScale ${rest.timeScale}, fov ${rest.fov.toFixed(1)} (baseline ${expectedFov.toFixed(1)}), camZ ${rest.camZ.toFixed(2)}, roll ${rest.camRoll.toFixed(3)}`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__drift.state.phase === 'run', null, { timeout: 5000 });
+
   // Gameplay screenshot for the by-eye check.
   await page.screenshot({ path: path.join(SHOTS_DIR, 'gameplay-1280x720.png') });
   console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, tunnel rings, HUD)`);
@@ -267,9 +377,23 @@ try {
   // ship passes it by — the nearest obstacle can be metres ahead after
   // the autopilot leg, too close to reach (v0.2.1 hardening; the
   // slalom reorder moved the autopilot's stop point further along).
+  // Fresh run for the hit test: the M3 gate-steering legs above may
+  // already have cost a shield, and this test needs two hits (flash
+  // off, then flash on) while leaving the run alive for the pause
+  // test that follows.
+  await page.keyboard.press('r');
+  await page.waitForFunction(() => {
+    const i = window.__drift.info();
+    return window.__drift.state.phase === 'run' && i.shields === 3;
+  }, null, { timeout: 5000 });
+  // M3: reduce-flashing. First hit with the toggle ON must not flash;
+  // second hit with it OFF must. The flash is captured atomically
+  // in-page the moment the shield drops (it only lasts 120ms, and
+  // under swiftshader a frame is ~200ms — a later read would miss it).
+  await page.evaluate(() => window.__drift.setReduceFlashing(true));
   const hitBefore = await page.evaluate(() => window.__drift.info());
-  let hit = false, hitKind = null;
-  for (let attempt = 0; attempt < 4 && !hit; attempt++) {
+  let hit = false, hitKind = null, flashOff = null, flashOn = null;
+  for (let attempt = 0; attempt < 6 && (flashOff === null || flashOn === null); attempt++) {
     const obstacle = await page.evaluate(() => {
       const i = window.__drift.info();
       if (!i || i.done) return null;
@@ -278,14 +402,32 @@ try {
     if (!obstacle) break;
     const shieldsNow = await page.evaluate(() => window.__drift.info().shields);
     await page.evaluate((o) => window.__drift.steerTo(o.x, o.y), obstacle);
-    hit = await page.waitForFunction((sh) => {
+    const h = await page.waitForFunction((sh) => {
       const i = window.__drift.info();
-      return !i || i.shields < sh || i.done;
-    }, shieldsNow, { timeout: 30000 }).then(() => true).catch(() => false);
+      if (!i) return false;
+      if (i.shields < sh || i.done) {
+        return { shields: i.shields, flash: document.getElementById('hit-flash').classList.contains('show'), done: i.done };
+      }
+      return false;
+    }, shieldsNow, { timeout: 30000, polling: 50 }).catch(() => null);
     await page.evaluate(() => window.__drift.clearTarget());
-    if (hit) hitKind = obstacle.kind;
+    if (h) {
+      const got = await h.jsonValue();
+      hit = true;
+      hitKind = obstacle.kind;
+      if (flashOff === null) {
+        flashOff = got.flash;
+        await page.evaluate(() => window.__drift.setReduceFlashing(false));
+      } else if (flashOn === null) {
+        flashOn = got.flash;
+      }
+    }
     await page.waitForTimeout(500);
   }
+  if (flashOff === null || flashOn === null) throw new Error(`could not land two hits to test the flash toggle (off: ${flashOff}, on: ${flashOn})`);
+  if (flashOff) throw new Error('reduce-flashing ON must suppress the hit flash');
+  if (!flashOn) throw new Error('reduce-flashing OFF must show the hit flash');
+  console.log('render-check: M3 reduce-flashing — flash suppressed when ON, shown when OFF');
   const hitAfter = await page.evaluate(() => window.__drift.info());
   if (!hit || hitAfter.shields >= hitBefore.shields) {
     throw new Error(`steering into obstacles did not cost a shield (shields ${hitBefore.shields} -> ${hitAfter.shields})`);

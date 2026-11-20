@@ -1,8 +1,8 @@
-// Neon Drift v0.2.1 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Drift v0.3.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
   simulateRun, centrePolicy, greedyPolicy, TUNNEL_RADIUS, SHIP_RADIUS, SHIELDS,
-  BOOST_MAX, GATE_SCORE, CELL_SCORE, FEEDBACK, FEEDBACK_TIERS,
+  BOOST_MAX, GATE_SCORE, CELL_SCORE, FEEDBACK, FEEDBACK_TIERS, FEEDBACK_LAYERS,
   mulberry32, clamp, defaultSave, serializeSave, parseSave, recordBest, SAVE_VERSION,
 } from '../physics.js';
 
@@ -14,7 +14,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.2.1', VERSION === '0.2.1');
+check('physics version is 0.3.0', VERSION === '0.3.0');
 check('12 tracks defined', TRACKS.length === 12);
 check('track ids are 1..12 in order', TRACKS.every((t, i) => t.id === i + 1));
 check('every track has a name and a hint', TRACKS.every((t) => t.name && t.hint));
@@ -248,6 +248,33 @@ check('hit is the medium tier', FEEDBACK.hit.tier === 'medium');
 check('collect and gate are small with no hit-stop',
   FEEDBACK.collect.tier === 'small' && FEEDBACK.collect.hitStop === 0
   && FEEDBACK.gate.tier === 'small' && FEEDBACK.gate.hitStop === 0);
+
+// --- feedback layers (M3: 5-8 layered responses per event) ---
+{
+  const KNOWN_LAYERS = new Set(['sound', 'particles', 'shake', 'hitStop', 'flash',
+    'knockback', 'squash', 'slowMo', 'fovPulse', 'pop', 'ringPulse', 'glowPulse', 'toast']);
+  for (const [kind, layers] of Object.entries(FEEDBACK_LAYERS)) {
+    check(`feedback layers defined for ${kind}`, Array.isArray(layers));
+    check(`feedback ${kind} carries 5-8 layers (${layers.length}: ${layers.join(', ')})`,
+      layers.length >= 5 && layers.length <= 8);
+    check(`feedback ${kind} layers are all known channels`,
+      layers.every((l) => KNOWN_LAYERS.has(l)));
+    check(`feedback ${kind} has no duplicate layers`, new Set(layers).size === layers.length);
+  }
+  check('every FEEDBACK event has a layer bundle',
+    Object.keys(FEEDBACK).every((k) => k in FEEDBACK_LAYERS));
+  check('every layer bundle maps to a FEEDBACK event',
+    Object.keys(FEEDBACK_LAYERS).every((k) => k in FEEDBACK));
+  // Small events never freeze time; large ones always do.
+  check('small events have no hit-stop layer',
+    ['launch', 'collect', 'gate', 'nearMiss', 'boost'].every((k) => !FEEDBACK_LAYERS[k].includes('hitStop')));
+  check('large event has hit-stop + flash + knockback',
+    FEEDBACK_LAYERS.runOver.includes('hitStop')
+    && FEEDBACK_LAYERS.runOver.includes('flash')
+    && FEEDBACK_LAYERS.runOver.includes('knockback'));
+  check('score events pop a number (gate/collect/nearMiss/complete)',
+    ['gate', 'collect', 'nearMiss', 'complete'].every((k) => FEEDBACK_LAYERS[k].includes('pop')));
+}
 
 // --- seeded determinism helpers ---
 {
