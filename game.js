@@ -1,4 +1,4 @@
-// Neon Drift v0.2.1 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
+// Neon Drift v0.3.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
 // The ship auto-flies forward through a neon tunnel; the player steers in
 // the cross-section with momentum and banking. Dodge blocks, mines and
 // moving barrier walls; thread magenta boost gates; collect gold energy
@@ -146,6 +146,24 @@ const ship = new THREE.Group();
   const glow = new THREE.Mesh(GEO.shipGlow, glowMat);
   glow.position.z = -1.0;
   ship.add(glow);
+  // M3: the ship reads as a glowing form from the chase view — give it
+  // a canopy and twin engine glows so it has a silhouette, not just a
+  // cone. The engine glows pulse with speed/boost (see updateScene).
+  const canopyMat = new THREE.MeshStandardMaterial({ color: 0x1e3a5f, emissive: 0xfbbf24, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.2 });
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), canopyMat);
+  canopy.scale.set(1, 0.7, 1.6);
+  canopy.position.set(0, 0.28, 0.35);
+  ship.add(canopy);
+  const engineGlowMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.9 });
+  const engineL = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), engineGlowMat);
+  engineL.position.set(-0.55, 0, -0.95);
+  ship.add(engineL);
+  const engineR = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), engineGlowMat);
+  engineR.position.set(0.55, 0, -0.95);
+  ship.add(engineR);
+  ship.userData.engineGlows = [engineL, engineR];
+  ship.userData.engineMat = engineGlowMat;
+  ship.userData.canopyMat = canopyMat;
 }
 scene.add(ship);
 
@@ -239,6 +257,7 @@ function ensureAudio() {
     musicGain.gain.value = musicOn ? 0.5 : 0;
     musicGain.connect(masterGain);
     startMusic();
+    startMusicSequencer();
     // Boost hum: a quiet sawtooth whose gain follows the boost state.
     boostOsc = audioCtx.createOscillator();
     boostOsc.type = 'sawtooth';
@@ -291,16 +310,97 @@ function noiseBurst(dur, vol, freq = 800) {
   src.connect(f); f.connect(g); g.connect(sfxGain);
   src.start(t);
 }
+// M3: a filtered noise sweep — the whoosh for near-miss and boost.
+// The filter sweeps up (whoosh past) instead of a flat burst, so it
+// reads as motion, not static.
+function whoosh(dur = 0.35, vol = 0.22, from = 300, to = 2400) {
+  if (!audioCtx || !sfxGain || muted) return;
+  const t = audioCtx.currentTime;
+  const len = Math.floor(audioCtx.sampleRate * dur);
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const f = audioCtx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.2;
+  f.frequency.setValueAtTime(from, t);
+  f.frequency.exponentialRampToValueAtTime(to, t + dur);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(f); f.connect(g); g.connect(sfxGain);
+  src.start(t);
+}
+// M3: the same tone never plays twice at exactly the same pitch —
+// a ±5% detune keeps repeated gates/cells from machine-gunning.
+function detune(freq) { return freq * (0.95 + Math.random() * 0.1); }
 const sfx = {
   tick() { tone(1200, 0.05, 'square', 0.06); },
-  gate() { tone(880, 0.12, 'sine', 0.22); setTimeout(() => tone(1320, 0.16, 'sine', 0.2), 70); },
-  collect() { tone(660, 0.09, 'sine', 0.2, 990); },
-  nearMiss() { tone(440, 0.14, 'sine', 0.12, 330); },
+  gate() { tone(detune(880), 0.12, 'sine', 0.22); setTimeout(() => tone(detune(1320), 0.16, 'sine', 0.2), 70); },
+  collect() { tone(detune(660), 0.09, 'sine', 0.2, detune(990)); },
+  nearMiss() { whoosh(0.3, 0.2, 400, 2600); tone(detune(440), 0.14, 'sine', 0.1, 330); },
+  boostStart() { whoosh(0.45, 0.25, 200, 1800); },
   hit() { noiseBurst(0.25, 0.4, 600); tone(110, 0.3, 'square', 0.25, 55); },
   complete() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.22, 'sine', 0.2), i * 90)); },
   runOver() { tone(220, 0.5, 'sawtooth', 0.25, 55); noiseBurst(0.4, 0.3, 400); },
   launch() { tone(220, 0.25, 'sine', 0.18, 660); },
 };
+
+// --- music: generative synthwave sequencer (M3) ---
+// The M1 pad was a static drone. Now a lookahead scheduler plays a
+// bass line (A minor) plus a sparse pentatonic arpeggio over the pad,
+// at ~104 BPM. The arpeggio doubles in density as the ship speeds up,
+// so the music follows the run — quiet in the menu, driving at full
+// speed. It starts on the first user gesture (ensureAudio) and stops
+// cleanly when the music toggle goes off; every node is created once
+// and reused, so there is no per-note allocation churn.
+const MUSIC_BPM = 104;
+const MUSIC_BASS = [55, 55, 65.41, 49, 55, 55, 82.41, 73.42]; // A1 A1 C2 G1 A1 A1 E2 D2
+const MUSIC_ARP = [220, 261.63, 329.63, 392, 440, 523.25, 659.25]; // A3 C4 E4 G4 A4 C5 E5
+let musicTimer = null, musicNextBeat = 0, musicStep = 0;
+function musicNote(freq, when, dur, vol, type = 'sine') {
+  if (!audioCtx || !musicGain) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  const f = audioCtx.createBiquadFilter();
+  o.type = type; o.frequency.value = freq;
+  f.type = 'lowpass'; f.frequency.value = 1400;
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(vol, when + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+  o.connect(f); f.connect(g); g.connect(musicGain);
+  o.start(when); o.stop(when + dur + 0.02);
+}
+function scheduleMusic() {
+  if (!audioCtx || !musicGain) return;
+  const beatLen = 60 / MUSIC_BPM;
+  // Schedule ~200ms ahead so timing stays tight even at low fps.
+  while (musicNextBeat < audioCtx.currentTime + 0.2) {
+    const step = musicStep % 8;
+    const when = musicNextBeat;
+    // Bass on every beat (quiet, sawtooth through the pad filter).
+    musicNote(MUSIC_BASS[step], when, beatLen * 0.9, 0.16, 'triangle');
+    // Arpeggio: one note per beat at low speed, two per beat when the
+    // ship is flying fast — the music accelerates with the run.
+    const speedNorm = phase === 'run' && run ? clamp((run.speed - 12) / 22, 0, 1) : 0;
+    const arpNotes = speedNorm > 0.55 ? 2 : 1;
+    for (let k = 0; k < arpNotes; k++) {
+      const idx = (step * 2 + k * 3 + Math.floor(musicStep / 8)) % MUSIC_ARP.length;
+      musicNote(MUSIC_ARP[idx], when + (k * beatLen) / arpNotes, beatLen * 0.45, 0.05);
+    }
+    musicNextBeat += beatLen;
+    musicStep++;
+  }
+}
+function startMusicSequencer() {
+  if (!audioCtx || musicTimer) return;
+  musicNextBeat = audioCtx.currentTime + 0.1;
+  musicStep = 0;
+  musicTimer = setInterval(scheduleMusic, 100);
+}
+function stopMusicSequencer() {
+  if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+}
 
 // --- game state ---
 let phase = 'menu'; // menu | run | paused | complete | runover
@@ -317,6 +417,11 @@ let timeScale = 1;
 let accumulator = 0;
 let lastFrame = performance.now();
 let fovCurrent = 72;
+let fovPulse = 0; // M3: extra FOV kick, decays to 0 (rest = 72)
+let knockback = 0; // M3: camera z push on hits, decays to 0 (rest = -8.5)
+let shipSquash = 0; // M3: ship scale pop on hits, decays to 0 (rest = 1)
+let glowPulse = 0; // M3: engine glow pulse on gate/collect, decays to 0
+let camRoll = 0; // M3: roll applied to the camera each frame (rest = 0)
 let toastTimer = null;
 let autoPilot = false;
 let hookSteer = null; // { sx, sy } | null — test/bot hook
@@ -453,7 +558,47 @@ function showToast(text, cls = '') {
   toastTimer = setTimeout(() => { el.classList.remove('show'); }, 900);
 }
 
-// --- feedback (game-feel tiers) ---
+// --- floating score pops (M3, game-feel: number pops) ---
+// A small pool of divs, reused so a burst of gates never allocates.
+// Each pop sits at the event's projected screen position — the gate or
+// cell the ship just threaded — with an overshoot pop + rise + fade
+// (CSS .pop / pop-rise). A pop never blocks input: the layer is
+// pointer-events none.
+const POP_POOL = 8;
+const popEls = [];
+let popCursor = 0;
+let lastPop = null; // { text, at } — the render check asserts pops fire
+function spawnPop(text, wx, wy, cls = '') {
+  // The pop rides just above the event (+1.2 world units): the event
+  // position is where the ship is at the crossing, so a pop at the
+  // exact spot would sit on top of the ship itself.
+  const sp = new THREE.Vector3(wx, wy + 1.2, 0).project(camera);
+  if (sp.z > 1) return; // event behind the camera — nothing to show
+  const idx = popCursor;
+  popCursor = (popCursor + 1) % POP_POOL;
+  let node = popEls[idx];
+  if (!node) {
+    node = document.createElement('div');
+    $('pops').appendChild(node);
+    popEls[idx] = node;
+  }
+  node.className = `pop ${cls}`;
+  node.textContent = text;
+  node.style.left = `${((sp.x + 1) / 2) * window.innerWidth}px`;
+  node.style.top = `${((1 - sp.y) / 2) * window.innerHeight}px`;
+  // Restart the CSS animation on the reused node: clear it, force a
+  // reflow, then let the class animation apply again.
+  node.style.animation = 'none';
+  void node.offsetWidth;
+  node.style.animation = '';
+  lastPop = { text, at: performance.now() };
+}
+
+// --- feedback (game-feel tiers + layers) ---
+// One call per event; the tier decides intensity (physics.js
+// FEEDBACK_LAYERS is the contract: 5-8 layers per event, all firing
+// within ~100ms of the event). Juice is transient — every layer
+// decays back to its exact rest value (see animate + updateScene).
 function applyFeedback(kind) {
   const f = FEEDBACK[kind];
   if (!f) return;
@@ -469,22 +614,35 @@ function handleEvent(ev) {
     applyFeedback('gate');
     sfx.gate();
     spawnParticles(ev.x, ev.y, 0, 0xf472b6, 26, 7);
-    showToast(`GATE +250`, 'toast-gate');
+    spawnPop('+250', ev.x, ev.y, 'pop-gate');
+    fovPulse = Math.min(1, fovPulse + 0.5);
+    glowPulse = Math.min(1, glowPulse + 0.6);
+    // Ring pulse: the gate the ship just threaded flashes wider.
+    const rec = entityMeshes.find((r) => r.entity.kind === 'gate' && r.entity.z === ev.z);
+    if (rec) rec.pulse = 1;
   } else if (ev.type === 'collect') {
     applyFeedback('collect');
     sfx.collect();
     spawnParticles(ev.x, ev.y, 0, 0xfbbf24, 18, 6);
+    spawnPop('+100', ev.x, ev.y, 'pop-cell');
+    glowPulse = Math.min(1, glowPulse + 0.4);
   } else if (ev.type === 'nearMiss') {
     applyFeedback('nearMiss');
     sfx.nearMiss();
     slowMoUntil = Math.max(slowMoUntil, performance.now() + 450);
-    showToast('NEAR MISS +25');
+    spawnParticles(ev.x, ev.y, 0, 0xffffff, 10, 5, 0.4);
+    spawnPop('+25', ev.x, ev.y, 'pop-near');
   } else if (ev.type === 'boostStart') {
     applyFeedback('boost');
+    sfx.boostStart();
+    fovPulse = Math.min(1, fovPulse + 0.6);
+    spawnParticles(run.x, run.y, -1.2, 0x22d3ee, 16, 6, 0.5);
   } else if (ev.type === 'hit') {
     applyFeedback('hit');
     sfx.hit();
     spawnParticles(ev.x, ev.y, 0, 0xa78bfa, 40, 11, 0.9);
+    knockback = 1;
+    shipSquash = 1;
     if (!reduceFlashing) {
       $('hit-flash').classList.add('show');
       setTimeout(() => $('hit-flash').classList.remove('show'), 120);
@@ -495,11 +653,15 @@ function handleEvent(ev) {
     applyFeedback('complete');
     sfx.complete();
     spawnParticles(run.x, run.y, 0, 0xfbbf24, 60, 12, 1.2);
+    fovPulse = Math.min(1, fovPulse + 0.8);
+    spawnPop(`+${run.score}`, run.x, run.y, 'pop-big');
     finishRun(true);
   } else if (ev.type === 'runOver') {
     applyFeedback('runOver');
     sfx.runOver();
     spawnParticles(run.x, run.y, 0, 0xf87171, 60, 13, 1.2);
+    knockback = 1;
+    shipSquash = 1;
     finishRun(false);
   }
 }
@@ -551,6 +713,9 @@ function startRun(trackId) {
   trailHist.length = 0;
   sfx.launch();
   applyFeedback('launch');
+  fovPulse = Math.min(1, fovPulse + 0.6);
+  glowPulse = 1;
+  spawnParticles(0, 0, -1.2, 0x22d3ee, 20, 6, 0.6);
   updateHUD();
   refreshTrackSelect();
   announce(`Track ${t.id}, ${t.name}. Steer with drag or arrow keys.`);
@@ -764,6 +929,8 @@ bindShake('shake-range-pause', 'shake-value-pause');
 $('music-toggle').addEventListener('change', (e) => {
   musicOn = e.target.checked;
   if (musicGain) musicGain.gain.value = musicOn ? 0.5 : 0;
+  if (musicOn) { ensureAudio(); startMusicSequencer(); }
+  else stopMusicSequencer();
 });
 $('sfx-toggle').addEventListener('change', (e) => {
   sfxOn = e.target.checked;
@@ -805,6 +972,9 @@ function updateScene(dt, now) {
   const activeRun = phase === 'menu' ? demoRun : run;
   const dist = activeRun ? activeRun.z : 0;
   const time = activeRun ? activeRun.time : now / 1000;
+  // Speed 0..1 across the track's speed band — drives the FOV kick,
+  // the camera pull-back and the engine glow (M3 camera polish).
+  const speedNorm = activeRun ? clamp((activeRun.speed - 12) / 22, 0, 1) : 0;
 
   // Tunnel rings stream past: they live AHEAD of the camera (positive
   // z, the ship flies toward +z) and recycle from far to near as the
@@ -825,6 +995,14 @@ function updateScene(dt, now) {
     ship.position.set(px, py, 0);
     ship.rotation.z = -activeRun.vx * 0.045;
     ship.rotation.x = activeRun.vy * 0.03;
+    // M3: hit squash — the ship squashes on impact, then springs back
+    // to its exact rest scale (volume-conserving: wider, flatter).
+    const sq = shipSquash;
+    ship.scale.set(1 + sq * 0.3, 1 - sq * 0.2, 1 + sq * 0.3);
+    // M3: engine glows breathe with speed and pulse on gate/collect.
+    const eg = 1 + glowPulse * 0.9 + speedNorm * 0.4 + (phase === 'run' && run.boosting ? 0.5 : 0);
+    for (const g of ship.userData.engineGlows) g.scale.setScalar(eg);
+    shipLight.intensity = 1.6 + speedNorm * 0.8 + glowPulse * 1.2;
     shipLight.position.set(px, py, -2);
     ship.visible = true;
     trailHist.unshift({ x: px, y: py, t: now });
@@ -848,7 +1026,8 @@ function updateScene(dt, now) {
     // Entity meshes ride toward the camera as distance grows. They
     // hide the moment they pass the ship (z < 1): between the ship and
     // the camera they would fill the screen as giant clipped shapes.
-    for (const { entity: e, mesh, spin } of entityMeshes) {
+    for (const rec of entityMeshes) {
+      const { entity: e, mesh, spin } = rec;
       const z = e.z - dist;
       mesh.visible = z > 1 && z < 260;
       if (!mesh.visible) continue;
@@ -861,6 +1040,12 @@ function updateScene(dt, now) {
       if (spin) {
         mesh.rotation.z += dt * (e.kind === 'cell' ? 2.2 : e.kind === 'gate' ? 0.6 : 1.2);
         if (e.kind === 'cell') mesh.position.y += Math.sin(now / 300 + e.z) * 0.002;
+      }
+      // M3: gate ring pulse — a threaded gate flashes wider, then
+      // settles back to its exact rest scale.
+      if (e.kind === 'gate') {
+        rec.pulse = Math.max(0, (rec.pulse || 0) - dt * 3);
+        mesh.scale.setScalar(1 + 0.35 * rec.pulse);
       }
     }
     // Invulnerability blink.
@@ -880,15 +1065,24 @@ function updateScene(dt, now) {
   const shakeAmp = trauma * trauma * shakeStrength;
   const shX = shakeAmp * (Math.sin(now * 0.09) * 0.6 + Math.sin(now * 0.031) * 0.4);
   const shY = shakeAmp * (Math.cos(now * 0.077) * 0.6 + Math.sin(now * 0.043) * 0.4);
-  camera.position.set(cx + shX, cy + shY, -8.5);
+  // M3: speed pull-back + hit knockback on the camera z (visual only —
+  // never the physics body). Rest is exactly -8.5.
+  const camZ = -8.5 - speedNorm * 1.1 - knockback * 1.4;
+  camera.position.set(cx + shX, cy + shY, camZ);
   camera.lookAt(
     (activeRun ? activeRun.x * 0.8 : 0) + shX * 0.5,
     (activeRun ? activeRun.y * 0.8 : 0) + shY * 0.5,
     14,
   );
-  // FOV kick with speed + boost.
-  const speedNorm = activeRun ? clamp((activeRun.speed - 12) / 22, 0, 1) : 0;
-  const targetFov = 72 + speedNorm * 10 + (phase === 'run' && run.boosting ? 5 : 0);
+  // M3: roll with the bank — the camera leans into the turn with the
+  // ship, then returns to exactly level when the ship flies straight.
+  // (Tracked in camRoll, not read off camera.rotation.z: lookAt flips
+  // the camera to face +z, so the Euler z reads ~pi, not the roll.)
+  camRoll = activeRun ? -activeRun.vx * 0.006 : 0;
+  camera.rotateZ(camRoll);
+  // FOV kick with speed + boost + pulse (M3: the pulse is the gate/
+  // boost "whoosh" you feel in your chest).
+  const targetFov = 72 + speedNorm * 10 + (phase === 'run' && run.boosting ? 5 : 0) + fovPulse * 4;
   if (Math.abs(targetFov - fovCurrent) > 0.05) {
     fovCurrent += (targetFov - fovCurrent) * Math.min(1, 4 * dt);
     camera.fov = fovCurrent;
@@ -909,6 +1103,13 @@ function animate(now) {
   else timeScale = 1;
   // Trauma decays in real time so shake settles during hit-stop.
   trauma = Math.max(0, trauma - realDt * 1.8);
+  // M3: every juice layer decays in real time too, so each one
+  // returns to its exact rest value (FOV 72, camera z -8.5, roll 0,
+  // ship scale 1, glow 1) and never leaves the game in a wrong state.
+  fovPulse = Math.max(0, fovPulse - realDt * 2.2);
+  knockback = Math.max(0, knockback - realDt * 2.0);
+  shipSquash = Math.max(0, shipSquash - realDt * 3.0);
+  glowPulse = Math.max(0, glowPulse - realDt * 2.0);
 
   const dt = realDt * timeScale;
   if (phase === 'run' && run && !run.done) {
@@ -1009,6 +1210,20 @@ window.__drift = {
         return { x: (sp.x + 1) / 2 * window.innerWidth, y: (1 - sp.y) / 2 * window.innerHeight };
       })(),
       done: run.done, reason: run.reason, upcoming,
+      // M3: juice state, for the render check + playtest probes.
+      // Every value has an exact rest value (fov 72, trauma 0,
+      // timeScale 1, camZ -8.5, camRoll 0) — the check asserts the
+      // game returns to rest after each event settles.
+      fov: fovCurrent, trauma, timeScale,
+      camZ: camera.position.z, camRoll,
+      fovPulse, knockback, lastPop,
+      // The actual shake amplitude driving the camera (trauma^2 *
+      // shake strength): with the shake toggle at 0 this stays 0
+      // even when an event adds trauma — the toggle's real effect.
+      shakeAmp: trauma * trauma * shakeStrength,
+      audio: audioCtx
+        ? { state: audioCtx.state, music: !!musicTimer, musicStep, sfxOn, musicOn }
+        : null,
     };
   },
   runState() {
@@ -1027,5 +1242,12 @@ window.__drift = {
   steerTo(x, y) { steerTarget = { x, y }; hookSteer = null; },
   clearTarget() { steerTarget = null; },
   autopilot(on) { autoPilot = !!on; },
+  // M3: accessibility toggles as test hooks (the settings UI drives
+  // the same state; the render check uses these to prove the toggles
+  // actually change what the player sees).
+  setShake(v) { shakeStrength = clamp(v, 0, 1); save.shake = shakeStrength; persistSave(); applySettingsToUI(); },
+  setReduceFlashing(b) { reduceFlashing = !!b; applySettingsToUI(); },
+  get shake() { return shakeStrength; },
+  get reduceFlashing() { return reduceFlashing; },
   save() { return JSON.parse(JSON.stringify(save)); },
 };

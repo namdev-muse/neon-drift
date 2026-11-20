@@ -254,6 +254,34 @@ h2 {
 .hud-toast.toast-gate { color: var(--magenta); text-shadow: 0 0 16px rgba(244, 114, 182, 0.8), 0 2px 8px rgba(0, 0, 0, 0.8); }
 .hud-toast.toast-hit { color: var(--danger); text-shadow: 0 0 16px rgba(248, 113, 113, 0.8), 0 2px 8px rgba(0, 0, 0, 0.8); }
 
+/* --- floating score pops (M3, game-feel: number pops) ---
+   Pooled divs, positioned at the event's projected screen position
+   (the gate/cell the ship just threaded, not a fixed HUD spot), with
+   an overshoot pop + rise + fade. Text scales with vmin (the 1920x1080
+   reference, expand policy), so pops stay legible at every sweep size.
+   pointer-events none: a pop never eats a steering drag. */
+.pops { position: fixed; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+.pop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: clamp(1rem, 2.6vmin, 1.6rem);
+  font-weight: 800; letter-spacing: 0.06em;
+  color: var(--gold);
+  text-shadow: 0 0 14px rgba(251, 191, 36, 0.9), 0 2px 6px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  animation: pop-rise 0.9s cubic-bezier(0.2, 1.6, 0.35, 1) both;
+}
+.pop.pop-gate { color: var(--magenta); text-shadow: 0 0 14px rgba(244, 114, 182, 0.9), 0 2px 6px rgba(0, 0, 0, 0.9); }
+.pop.pop-cell { color: var(--gold); }
+.pop.pop-near { color: var(--cyan-bright); text-shadow: 0 0 14px rgba(103, 232, 249, 0.9), 0 2px 6px rgba(0, 0, 0, 0.9); }
+.pop.pop-big { font-size: clamp(1.6rem, 4.5vmin, 2.6rem); }
+@keyframes pop-rise {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  18% { opacity: 1; transform: translate(-50%, -62%) scale(1.18); }
+  35% { transform: translate(-50%, -72%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -190%) scale(0.96); }
+}
+
 .hit-flash {
   position: fixed; inset: 0;
   background: radial-gradient(ellipse at center, transparent 40%, rgba(248, 113, 113, 0.45) 100%);

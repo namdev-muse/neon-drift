@@ -9,8 +9,8 @@ track to complete it. Score comes from distance, gates and cells — your
 best distance is saved per track.
 
 **Live:** https://namdev-muse.github.io/neon-drift/
-**Version:** v0.2.1 (M2 track craft + steering-mirror hotfix)
-**Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX, GitHub Pages.
+**Version:** v0.3.0 (M3 feel & juice)
+**Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
 
@@ -68,16 +68,23 @@ between adjacent tracks.
 
 ## Game feel
 
-Trauma screen shake (small / medium / large tiers with hit-stop),
-hit-stop on impacts, near-miss slow-mo, pooled particles on every
-event, FOV kick with speed, Web Audio synth SFX and an ambient pad,
-screen-shake and reduce-flashing settings.
+Every event fires a layered bundle of 5–8 responses within ~100 ms
+(sound, particles, shake, flash, knockback, hit-stop, slow-mo, FOV
+pulse, floating score pops) — the tiers stay proportional: small
+events pop, medium events punch, large events shake the whole screen.
+Trauma screen shake with hit-stop, near-miss slow-mo, camera roll with
+the bank, speed pull-back, FOV kick with speed plus a pulse on gates
+and boost, ship squash on hits, engine glow that breathes with speed.
+Web Audio synth SFX (pitch-varied so repeats never machine-gun) and a
+generative synthwave sequencer — bass line plus arpeggio that doubles
+in density as the ship speeds up. Screen-shake and reduce-flashing
+settings; every effect decays back to its exact rest state.
 
 ## Tests
 
-- `npm run smoke` — 275 physics checks (tracks, steering, boost, gates, cells, hits, save, anti-slop gate)
+- `npm run smoke` — 312 physics checks (tracks, steering, boost, gates, cells, hits, save, feedback tiers + layer bundles, anti-slop gate)
 - `npm test` — smoke + bot (steering bot completes all 12 tracks; holding centre fails all 12)
-- `npm run render-check` — headless Chromium: menu over the live 3D scene, steering, gates, cells, shield loss, run-over, pause, restart, zero console errors
+- `npm run render-check` — headless Chromium: menu over the live 3D scene, steering, gates, cells, shield loss, run-over, pause, restart, plus the M3 juice assertions (score pops, music sequencer, FOV pulse, shake toggle, reduce-flashing, exact rest state), zero console errors
 - `npm run screenshots` — README captures + 3-resolution size sweep (1280x720, 2560x1080, 1080x2340), inspected by eye
 
 ## Devlog

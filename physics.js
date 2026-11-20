@@ -1,4 +1,4 @@
-// Neon Drift v0.2.1 — pure simulation core (no DOM, no Three.js).
+// Neon Drift v0.3.0 — pure simulation core (no DOM, no Three.js).
 // The ship auto-flies forward through a neon tunnel; the player steers
 // in the tunnel cross-section (x, y) with momentum and banking. Entities
 // live at a distance z along the track: blocks, mines, moving barriers,
@@ -7,7 +7,7 @@
 // Deterministic: every track is built from a fixed seed, and the fixed
 // step simulation gives identical results for identical inputs.
 
-export const VERSION = '0.2.1';
+export const VERSION = '0.3.0';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;
@@ -56,6 +56,25 @@ export const FEEDBACK = {
   hit: { tier: 'medium', trauma: 0.45, hitStop: 0.05 },
   complete: { tier: 'medium', trauma: 0.40, hitStop: 0.05 },
   runOver: { tier: 'large', trauma: 0.90, hitStop: 0.12 },
+};
+
+// --- feedback layers (game-feel skill: one satisfying event is 5-8
+// tiny responses firing together within ~100ms: sound, particles,
+// shake, flash, knockback, hit-stop, slow-mo, FOV pulse, number pop.
+// This is the contract game.js implements per event; the smoke test
+// asserts every event carries at least 5 layers, and the render check
+// asserts the layers actually fire in the browser. Layers are named
+// so a layer missing from the implementation is a failing test, not
+// a silent gap. ---
+export const FEEDBACK_LAYERS = {
+  launch: ['sound', 'shake', 'fovPulse', 'particles', 'glowPulse'],
+  collect: ['sound', 'particles', 'shake', 'pop', 'glowPulse'],
+  gate: ['sound', 'particles', 'shake', 'pop', 'fovPulse', 'ringPulse'],
+  nearMiss: ['sound', 'slowMo', 'shake', 'pop', 'particles'],
+  boost: ['sound', 'fovPulse', 'particles', 'shake', 'glowPulse'],
+  hit: ['sound', 'particles', 'shake', 'hitStop', 'flash', 'knockback', 'squash', 'toast'],
+  complete: ['sound', 'particles', 'shake', 'hitStop', 'fovPulse', 'pop', 'toast'],
+  runOver: ['sound', 'particles', 'shake', 'hitStop', 'flash', 'knockback', 'squash', 'toast'],
 };
 
 // --- tracks ---
