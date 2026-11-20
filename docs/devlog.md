@@ -41,3 +41,46 @@ milestone log for the honest detail).
   instead of using fixed windows. On a real GPU it runs at 60fps.
 - Track run times are long (65–80 s per track at bot pace) — the
   campaign pacing is a tuning question for M2.
+
+## M2 — Track craft (v0.2.0) — 2026-11-21
+
+Second milestone: the campaign grows from 6 tracks to 12, with a new
+segment rhythm — the **spiral**, where boost gates orbit the centre and
+the ship must fly a circle, not a line. Each new track has its own
+palette and identity: Solar Flare (spiral debut), Emerald Rush (double
+barriers everywhere), Rose Nebula (minefields + spirals), Azure Deep
+(gauntlet after gauntlet), Acid Rain (spiral/slalom alternation), Void
+Crown (everything, at full speed). The difficulty curve is smooth by
+measurement: bot run times grow steadily 68 s → 91 s across the 12
+tracks, with no cliff between adjacent tracks.
+
+**Tuning found by the bot, not by guessing:**
+- The first draft failed: the bot died on tracks 9, 11 and 12, all on
+  double-barrier segments (the two walls were 80 u apart with the gap
+  sliding ±7 — no time to re-aim at the higher speeds). The walls were
+  spaced to 100 u apart and their slide eased to ±6.
+- The bot's clearance scoring was also a weak link: it treated a
+  0.4-clearance pass as nearly as good as a 2-clearance one, so it flew
+  into centre mines while chasing gates. It now pays a steep penalty
+  for flying close to any obstacle.
+- The last failure was a real geometry trap in the **slalom** segment
+  itself (all 12 tracks): the gate sat 11 u before the centre mine, so
+  the swing from the gate to the next block's safe side crossed the
+  mine's line — unthreadable at speed even on a good line. The gate now
+  rides after the mine, so the mine is met while the ship is still on
+  the open side and the gate-to-block swing is clear. The centre line
+  is still guarded: holding centre hits the mine.
+
+**Tests:** smoke 275/275, bot 12/12 tracks completed by the steering bot
+(centre fails 12/12), render check PASS (zero console errors), size
+sweep inspected by eye at 1280x720, 2560x1080, 1080x2340.
+
+**Playtest verdict:** GO — the spiral orbits (534° ship sweep vs 540°
+gate orbit on T7), a lagged noisy hand-chaser threads all 9 gates to
+500 m on T7, and T11/T12 event timelines show a decision every 1–4 s
+with no dead stretches (see the M2 milestone log for the honest detail).
+
+**Known issues:**
+- Best-distance saves for tracks 7–12 needed a save-schema fix: the
+  old parser only accepted track ids 1–6. Fixed in this milestone
+  (ids 1–12 accepted).
