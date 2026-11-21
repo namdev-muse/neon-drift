@@ -1,4 +1,4 @@
-// Neon Drift v0.5.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Drift v1.0.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
   simulateRun, centrePolicy, greedyPolicy, TUNNEL_RADIUS, SHIP_RADIUS, SHIELDS,
@@ -18,7 +18,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.5.0', VERSION === '0.5.0');
+check('physics version is 1.0.0', VERSION === '1.0.0');
 check('12 tracks defined', TRACKS.length === 12);
 check('track ids are 1..12 in order', TRACKS.every((t, i) => t.id === i + 1));
 check('every track has a name and a hint', TRACKS.every((t) => t.name && t.hint));

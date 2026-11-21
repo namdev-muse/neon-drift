@@ -1,4 +1,4 @@
-// Neon Drift v0.5.0 — cross-browser check (M5): the same core pass as
+// Neon Drift v1.0.0 — cross-browser check (M5): the same core pass as
 // the Chromium render check, but in headless Firefox. Compact on
 // purpose — menu, WebGL, Play, steering, autopilot gate + cell, zero
 // errors — so the 2-hour milestone cadence can afford both browsers.
@@ -161,8 +161,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.5.0') throw new Error(`expected version 0.5.0, got ${version}`);
-  console.log('firefox-check: game module initialised in Firefox, version 0.5.0');
+  if (version !== '1.0.0') throw new Error(`expected version 1.0.0, got ${version}`);
+  console.log('firefox-check: game module initialised in Firefox, version 1.0.0');
 
   const gl = await page.evaluate(() => {
     const canvas = document.querySelector('#game-container canvas');
@@ -175,7 +175,7 @@ try {
 
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing in Firefox');
-  if (menuText.includes('v0.5.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v1.0.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text in Firefox');
   }
   const trackCards = await page.locator('#track-select .track-card').count();
