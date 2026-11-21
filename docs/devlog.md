@@ -1,5 +1,57 @@
 # Neon Drift — devlog
 
+## M5 — Polish & robustness (v0.5.0) — 2026-11-21
+
+Polish, not features. **Accessibility:** text size (Normal / Large /
+Extra large), high contrast panels and text, and reduce-flashing now
+**persists** — before M5 the toggle reset on every load — with a
+`prefers-reduced-motion` default until the player chooses. **Performance:**
+an FPS guard watches the frame rate and steps the pixel ratio (2 → 1.5
+→ 1) and the particle budget down after ~3 s below 28 fps, stepping
+back up after ~8 s above 50 fps; gameplay is never touched, only
+rendering cost. **Bugs from playtests, fixed:** the 50% distance gate
+now toasts the track unlock mid-run (and the run-over screen says so
+too — before, a player who died past halfway unlocked the next track
+silently), hit bursts are smaller (40 → 24 particles) so the ship no
+longer hides inside its own explosion, `setPointerCapture` can't throw
+on edge-case pointers, and a browser with no WebGL at all now gets a
+plain message with Play disabled instead of a menu full of dead
+buttons. **Touch:** a real touch drag steers (verified with genuine
+touch input, not synthetic events) and the first touch reveals the
+Boost button. **Cross-browser:** Chromium render check passes fully;
+headless Firefox in this VM cannot create a WebGL context at all (no
+system EGL — tried force-enabled prefs, Chromium's ANGLE libraries,
+and disabling the content sandbox), so `tests/firefox-check.js`
+verifies the graceful WebGL-failure path there and reports BLOCKED
+rather than a false pass. A full Firefox flight check needs a machine
+with EGL; the game uses standard Three.js WebGL2 with no
+Chromium-only APIs.
+
+**Tests:** smoke 409/409, bot 12/12, render check PASS (zero console
+errors) including the new M5 assertions — text size 16 → 18 → 20 px
+persisted through the settings UI, high contrast toggles + persists,
+reduce-flashing persists, the FPS guard stepped down on its own under
+swiftshader and forced levels stick, touch-drag steers right on screen
+and reveals the Boost button, and the 50% unlock toast fired mid-run
+during the Time Trial leg. Firefox check BLOCKED (environment, see
+above) with its DOM tier passing. Size sweep inspected by eye at
+1280x720, 2560x1080, 1080x2340, plus the settings screen at the phone
+size with Extra large text.
+
+**Playtest verdict:** GO. The lagged, noisy human-like driver
+**completed T1** (1299 m, 66.8 s, 8 gates, 7 cells, 4 near-misses, 1
+hit, 2 shields left, 22 pops, 68 energy banked) — livelier than M4's
+leg, which died at 910 m — saw the unlock toast mid-run, and the
+complete screen announced "Track 2 — Violet Spiral unlocked!". The
+after-hit frame shows the ship clearly visible beside its burst (the
+M3/M4 soft spot is fixed). A second leg with Large text + high
+contrast at phone size flew cleanly (2 gates, 1 cell, 0 hits in the
+time the slow renderer allowed) and caught one real bug by eye: the
+high-contrast button rule flattened the primary button's bright
+gradient, leaving dark "Play" text on a dark button — fixed by
+scoping the override to non-primary buttons. The settings screen at
+phone size with Extra large text was re-captured after the fix.
+
 ## M4 — Progression & depth (v0.4.0) — 2026-11-21
 
 The campaign now has a reason to replay. Every run banks **energy**
@@ -28,7 +80,11 @@ a saved best time, banked energy and track 2 unlocked. Size sweep
 inspected by eye at 1280x720, 2560x1080, 1080x2340, plus the upgrades
 screen at the phone size.
 
-**Playtest verdict:** (filled in after the real-browser playtest.)
+**Playtest verdict:** GO. A lagged, noisy human-like gate-chaser died at
+910 m on T1 (16 pops, 52 energy), then completed T1 with Thrusters 1
+(25 pops, 60 energy) — the upgrade is legible in play. Time Trial leg
+died at 355 m; the medal moment was proven by the render check's
+autopilot (GOLD 60.8 s, "New best time!").
 
 ## M1 — Core (v0.1.0) — 2026-11-21
 
