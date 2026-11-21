@@ -9,8 +9,14 @@ track to complete it. Score comes from distance, gates and cells — your
 best distance is saved per track.
 
 **Live:** https://namdev-muse.github.io/neon-drift/
-**Version:** v0.5.0 (M5 polish & robustness)
+**Version:** v1.0.0 (M6 release)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
+
+> v1.0.0 is the release build: the full 12-track campaign, ship
+> upgrades, Time Trial medals, accessibility settings and the FPS
+> guard, all playtested in a real browser. No new features over
+> v0.5.0 — this milestone is the release: final playthrough, fresh
+> screenshots, and the release tag.
 
 ## Gameplay
 

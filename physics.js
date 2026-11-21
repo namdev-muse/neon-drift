@@ -20,7 +20,7 @@
 // recovery (PERF_LEVELS is the contract), and the save schema carries
 // the new settings so an old save migrates cleanly.
 
-export const VERSION = '0.5.0';
+export const VERSION = '1.0.0';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;

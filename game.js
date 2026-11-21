@@ -1,4 +1,4 @@
-// Neon Drift v0.5.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
+// Neon Drift v1.0.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
 // The ship auto-flies forward through a neon tunnel; the player steers in
 // the cross-section with momentum and banking. Dodge blocks, mines and
 // moving barrier walls; thread magenta boost gates; collect gold energy
