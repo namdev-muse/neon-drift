@@ -1,5 +1,48 @@
 # Neon Drift — devlog
 
+## M6 — Release (v1.0.0) — 2026-11-21
+
+The release build. No new features over v0.5.0 — this milestone is
+the release: version bump to v1.0.0, a final full playthrough in a
+real browser, fresh screenshots, and the v1.0.0 release tag. The game
+ships as it was playtested: 12 hand-crafted tracks, the energy
+economy and three upgrade lines, Time Trial medals, accessibility
+settings (text size, high contrast, reduce-flashing) and the FPS
+guard.
+
+**Final playthrough (real browser, human-like driver):** T1
+completed fresh-profile in 66.8 s (25 score pops, unlock toast,
+"Track 2 — Violet Spiral unlocked!"); T6 died at 1520 m of 2100 m
+(27 pops, 16 near-misses — deep in, not a wall); T12 died at 1718 m
+of 3300 m (34 pops, 18 near-misses — the finale track is hard for a
+noisy driver, and the precise bot still clears it in 91 s); Time
+Trial T1 completed in 1:06.9 for a SILVER medal (par 1:08.0, gold
+1:06.6 — two tenths off gold). Zero console errors across all four
+legs. The after-hit frame still shows the ship clearly beside its
+burst (the M5 fix holds).
+
+**Tests:** smoke 409/409, bot 12/12 (steering bot completes all 12
+tracks; holding centre fails all 12), render check PASS (zero console
+errors, Time Trial GOLD 60.8 s again), size sweep inspected by eye
+at 1280x720, 2560x1080, 1080x2340 — clean at all three.
+
+**Playtest verdict:** GO — the game is done. It plays the way the
+sprint promised: steering is the skill, the tracks demand real
+decisions, and the economy gives every run a reason.
+
+**Known issues:**
+- Headless Firefox in this VM cannot create a WebGL context at all
+  (no system EGL — tried force-enabled prefs, Chromium's ANGLE
+  libraries, and disabling the content sandbox), so
+  `tests/firefox-check.js` verifies the graceful WebGL-failure path
+  there and reports BLOCKED rather than a false pass. A full Firefox
+  flight check needs a machine with EGL; the game uses standard
+  Three.js WebGL2 with no Chromium-only APIs.
+- Under swiftshader the game runs at ~5 fps, so short-lived juice
+  (a 0.15 s trauma spike, a 120 ms flash) can fall between frames —
+  the render check polls every 50 ms and captures values atomically
+  in-page instead of reading them after the fact.
+
 ## M5 — Polish & robustness (v0.5.0) — 2026-11-21
 
 Polish, not features. **Accessibility:** text size (Normal / Large /
