@@ -110,6 +110,13 @@ h2 {
 .menu-col { display: flex; flex-direction: column; gap: 10px; }
 .menu-best { color: var(--gold); font-size: 0.95rem; margin: 4px 0 0; min-height: 1.2em; }
 .menu-energy { color: var(--gold); font-size: 0.95rem; margin: 0; min-height: 1.2em; }
+/* M5: shown only when the browser cannot create a WebGL context at
+   all — the menu then says so plainly instead of offering dead buttons. */
+.webgl-error {
+  color: var(--danger); font-weight: 700; line-height: 1.5;
+  border: 1px solid var(--danger); border-radius: 10px;
+  padding: 10px 14px; margin: 8px 0;
+}
 .track-hint { color: var(--muted); font-size: 0.95rem; margin: 2px 0 0; min-height: 2.4em; }
 
 /* --- M4: mode toggle (Campaign / Time Trial) ---
@@ -360,6 +367,43 @@ h2 {
 }
 .slider-row input[type="range"] { flex: 1; accent-color: var(--cyan); }
 .toggle-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--cyan); }
+
+/* --- M5: accessibility — text size + high contrast --- */
+/* Text size scales the root font-size, so every rem-based size (panel
+   text, buttons, track cards) grows together; vmin clamps still cap it. */
+html[data-text-size="large"] { font-size: 112.5%; }
+html[data-text-size="xlarge"] { font-size: 125%; }
+body.high-contrast {
+  --panel: rgba(5, 8, 28, 0.97);
+  --panel-border: rgba(103, 232, 249, 0.85);
+  --text: #f8fafc;
+  --muted: #cbd5e1;
+}
+/* The primary button keeps its bright gradient (dark text on it) —
+   the override below must NOT touch it: an earlier draft flattened
+   every button to dark translucent, which left dark primary text on a
+   dark background (caught by eye in the M5 playtest). */
+body.high-contrast .btn:not(.primary) {
+  background: rgba(34, 211, 238, 0.25);
+  border-color: rgba(103, 232, 249, 0.9);
+}
+body.high-contrast .btn.primary {
+  background: linear-gradient(135deg, var(--cyan-bright), #e9d5ff);
+  color: #06121f;
+}
+body.high-contrast .track-card { border-color: rgba(103, 232, 249, 0.6); }
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 10px 0; text-align: left;
+}
+.settings-label { font-weight: 600; }
+.seg { display: flex; gap: 8px; }
+.seg-btn.active {
+  background: rgba(34, 211, 238, 0.22);
+  border-color: var(--cyan);
+  color: var(--cyan-bright);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.3);
+}
 
 /* --- touch boost button --- */
 .boost-btn {

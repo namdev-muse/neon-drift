@@ -1,4 +1,4 @@
-// Neon Drift v0.4.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
+// Neon Drift v0.5.0 — 3D neon tunnel racer (Three.js 0.160.0, no build step).
 // The ship auto-flies forward through a neon tunnel; the player steers in
 // the cross-section with momentum and banking. Dodge blocks, mines and
 // moving barrier walls; thread magenta boost gates; collect gold energy
@@ -11,13 +11,20 @@
 // +3, distance gates +10) and spent on ship upgrades (Thrusters /
 // Plating / Boost Tank); tracks unlock down the chain at 50% best
 // distance; Time Trial mode races the par time for gold/silver/bronze.
+//
+// M5 — polish & robustness: text-size + high-contrast accessibility
+// settings (persisted), reduce-flashing persisted with a
+// prefers-reduced-motion default, an FPS guard that steps the pixel
+// ratio and particle budget down under sustained low frame rates,
+// a 50% unlock toast, and smaller hit bursts so the ship never hides
+// inside its own explosion.
 import * as THREE from 'three';
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
   greedyPolicy, clamp, TUNNEL_RADIUS, SHIP_RADIUS, BOOST_MAX,
   FEEDBACK, DT, defaultSave, serializeSave, parseSave, recordBest,
   UPGRADE_DEFS, buyUpgrade, isTrackUnlocked, medalForTime, recordBestTime,
-  MEDAL_MULT,
+  MEDAL_MULT, PERF_LEVELS, PERF_LOW_FPS, PERF_HIGH_FPS, PERF_LOW_SECS, PERF_HIGH_SECS,
 } from './physics.js';
 
 const SAVE_KEY = 'neon-drift-save-v1';
@@ -35,13 +42,51 @@ function persistSave() {
 
 // --- settings (from save + defaults) ---
 let volume = 0.6;
-let musicOn = true, sfxOn = true, reduceFlashing = false;
+let musicOn = true, sfxOn = true;
 let shakeStrength = save.shake ?? 1;
 let muted = save.muted ?? false;
+// M5: reduceFlashing null in the save means "never chosen" — follow
+// the OS prefers-reduced-motion setting until the player picks.
+let reduceFlashing = save.reduceFlashing ?? (window.matchMedia
+  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false);
+let textSize = save.textSize ?? 'normal';
+let highContrast = save.highContrast ?? false;
+// M5: the FPS guard's current level (0 = full quality). Applied by
+// applyPerfLevel; the guard in animate() moves it up/down.
+let perfLevel = 0;
+let particleScale = PERF_LEVELS[0].particleScale;
+let fpsEma = 60, lowFpsTime = 0, highFpsTime = 0;
+
+// M5: text size + high contrast live on the document, so every screen
+// (menu, HUD, settings, end screens) picks them up at once.
+function applyAccessibility() {
+  document.documentElement.dataset.textSize = textSize;
+  document.body.classList.toggle('high-contrast', highContrast);
+}
+function applyPerfLevel(level) {
+  perfLevel = clamp(level, 0, PERF_LEVELS.length - 1);
+  const cfg = PERF_LEVELS[perfLevel];
+  particleScale = cfg.particleScale;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cfg.pixelRatio));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
 // --- three.js setup ---
+// M5: if this browser cannot create a WebGL context at all (old
+// device, blocked driver), say so plainly instead of leaving a menu
+// full of dead buttons — the module cannot boot without a renderer,
+// so the failure is shown and the menu buttons are disabled here,
+// before anything else runs.
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  const err = $('webgl-error');
+  if (err) err.classList.remove('hidden');
+  document.querySelectorAll('#menu button').forEach((b) => { b.disabled = true; });
+  throw e;
+}
 const container = $('game-container');
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 container.appendChild(renderer.domElement);
@@ -217,8 +262,11 @@ for (let i = 0; i < P_COUNT; i++) {
 }
 let pCursor = 0;
 function spawnParticles(x, y, z, colorHex, n, speed, life = 0.7) {
+  // M5: the FPS guard scales bursts down — but never to zero: even
+  // at the lowest level every event still reads (min 1 particle).
+  const count = Math.max(1, Math.round(n * particleScale));
   const c = new THREE.Color(colorHex);
-  for (let k = 0; k < n; k++) {
+  for (let k = 0; k < count; k++) {
     const p = particles[pCursor];
     pCursor = (pCursor + 1) % P_COUNT;
     p.life = p.max = life * (0.6 + Math.random() * 0.8);
@@ -656,8 +704,16 @@ function handleEvent(ev) {
     sfx.collect();
     spawnParticles(run.x, run.y, 0, 0xfbbf24, 14, 5);
     spawnPop('+10', run.x, run.y, 'pop-energy');
+    // M5: the 50% gate is also the unlock moment — if the next track
+    // was still locked, say so now instead of leaving the player to
+    // discover it silently on the menu after a run-over.
     const pct = Math.round(ev.fraction * 100);
-    showToast(pct === 100 ? 'FINISH LINE — +10 ENERGY' : `${pct}% — +10 ENERGY`, 'toast-gate');
+    const nextId = ev.fraction === 0.5 && track.id < TRACKS.length ? track.id + 1 : null;
+    if (nextId && !isTrackUnlocked(save, nextId)) {
+      showToast(`TRACK ${nextId} — ${trackById(nextId).name} UNLOCKED!`, 'toast-gate');
+    } else {
+      showToast(pct === 100 ? 'FINISH LINE — +10 ENERGY' : `${pct}% — +10 ENERGY`, 'toast-gate');
+    }
   } else if (ev.type === 'nearMiss') {
     applyFeedback('nearMiss');
     sfx.nearMiss();
@@ -672,7 +728,9 @@ function handleEvent(ev) {
   } else if (ev.type === 'hit') {
     applyFeedback('hit');
     sfx.hit();
-    spawnParticles(ev.x, ev.y, 0, 0xa78bfa, 40, 11, 0.9);
+    // M5: 40 → 24 — the old burst hid the ship inside its own
+    // particle cloud for a beat after every hit (M3/M4 soft spot).
+    spawnParticles(ev.x, ev.y, 0, 0xa78bfa, 24, 11, 0.9);
     knockback = 1;
     shipSquash = 1;
     if (!reduceFlashing) {
@@ -684,14 +742,14 @@ function handleEvent(ev) {
   } else if (ev.type === 'complete') {
     applyFeedback('complete');
     sfx.complete();
-    spawnParticles(run.x, run.y, 0, 0xfbbf24, 60, 12, 1.2);
+    spawnParticles(run.x, run.y, 0, 0xfbbf24, 40, 12, 1.2);
     fovPulse = Math.min(1, fovPulse + 0.8);
     spawnPop(`+${run.score}`, run.x, run.y, 'pop-big');
     finishRun(true);
   } else if (ev.type === 'runOver') {
     applyFeedback('runOver');
     sfx.runOver();
-    spawnParticles(run.x, run.y, 0, 0xf87171, 60, 13, 1.2);
+    spawnParticles(run.x, run.y, 0, 0xf87171, 40, 13, 1.2);
     knockback = 1;
     shipSquash = 1;
     finishRun(false);
@@ -747,6 +805,10 @@ function finishRun(completed) {
       + (run.mode === 'timetrial' ? ` · Survived ${fmtTime(run.time)} — finish the track to set a time` : '');
     $('runover-best').textContent = `Best distance: ${Math.floor(best.distance)} m · Best score: ${best.score}`;
     $('runover-energy').textContent = `Banked ${run.energy} energy · Balance ${save.energy}`;
+    // M5: a run-over that still passed the 50% gate unlocked the next
+    // track — say so here too, not only on the complete screen.
+    $('runover-unlock').textContent = (!wasUnlockedNext && unlockedNext)
+      ? `Track ${nextId} — ${trackById(nextId).name} unlocked!` : '';
     resetScreens('runover');
     announce(`Ship down at ${Math.floor(run.distance)} metres.`);
   }
@@ -902,7 +964,9 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   dragging = true;
   dragStartX = e.clientX; dragStartY = e.clientY;
   dragX = 0; dragY = 0;
-  renderer.domElement.setPointerCapture(e.pointerId);
+  // M5: capture can throw for a pointer that is not active (synthetic
+  // events, edge cases) — steering must not die on it.
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch { /* drag still works without capture */ }
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (!dragging) return;
@@ -1053,6 +1117,15 @@ function applySettingsToUI() {
   $('music-toggle').checked = musicOn;
   $('sfx-toggle').checked = sfxOn;
   $('reduce-flashing').checked = reduceFlashing;
+  // M5: text size is a segmented control (Normal / Large / Extra large).
+  for (const size of ['normal', 'large', 'xlarge']) {
+    const b = $(`btn-text-${size}`);
+    if (b) {
+      b.classList.toggle('active', textSize === size);
+      b.setAttribute('aria-pressed', String(textSize === size));
+    }
+  }
+  $('high-contrast').checked = highContrast;
   applyMute();
 }
 $('volume-range').addEventListener('input', (e) => {
@@ -1087,7 +1160,33 @@ $('sfx-toggle').addEventListener('change', (e) => {
   sfxOn = e.target.checked;
   if (sfxGain) sfxGain.gain.value = sfxOn ? 1 : 0;
 });
-$('reduce-flashing').addEventListener('change', (e) => { reduceFlashing = e.target.checked; });
+$('reduce-flashing').addEventListener('change', (e) => {
+  // M5: the toggle is now persisted — before M5 it reset to off on
+  // every load, so a player who needed it had to re-enable it each visit.
+  reduceFlashing = e.target.checked;
+  save.reduceFlashing = reduceFlashing;
+  persistSave();
+});
+// M5: text size + high contrast — same pattern: pick, persist, apply.
+function setTextSize(size) {
+  if (!['normal', 'large', 'xlarge'].includes(size)) return;
+  textSize = size;
+  save.textSize = size;
+  persistSave();
+  applyAccessibility();
+  applySettingsToUI();
+}
+function setHighContrast(on) {
+  highContrast = !!on;
+  save.highContrast = highContrast;
+  persistSave();
+  applyAccessibility();
+  applySettingsToUI();
+}
+for (const size of ['normal', 'large', 'xlarge']) {
+  $(`btn-text-${size}`).addEventListener('click', () => { ensureAudio(); setTextSize(size); });
+}
+$('high-contrast').addEventListener('change', (e) => setHighContrast(e.target.checked));
 
 // --- buttons (hover tick + press feedback are CSS; the tick is here) ---
 function wireButton(id, fn) {
@@ -1272,6 +1371,24 @@ function animate(now) {
   shipSquash = Math.max(0, shipSquash - realDt * 3.0);
   glowPulse = Math.max(0, glowPulse - realDt * 2.0);
 
+  // M5: FPS guard — sustained low fps steps the pixel ratio and
+  // particle budget down (PERF_LEVELS); sustained high fps steps back
+  // up. The guard never touches gameplay, only rendering cost, and
+  // the EMA keeps a single slow frame from triggering a step.
+  if (realDt > 0) {
+    fpsEma += (1 / realDt - fpsEma) * 0.05;
+    if (fpsEma < PERF_LOW_FPS) { lowFpsTime += realDt; highFpsTime = 0; }
+    else if (fpsEma > PERF_HIGH_FPS) { highFpsTime += realDt; lowFpsTime = 0; }
+    else { lowFpsTime = 0; highFpsTime = 0; }
+    if (lowFpsTime >= PERF_LOW_SECS && perfLevel < PERF_LEVELS.length - 1) {
+      applyPerfLevel(perfLevel + 1);
+      lowFpsTime = 0;
+    } else if (highFpsTime >= PERF_HIGH_SECS && perfLevel > 0) {
+      applyPerfLevel(perfLevel - 1);
+      highFpsTime = 0;
+    }
+  }
+
   const dt = realDt * timeScale;
   if (phase === 'run' && run && !run.done) {
     accumulator += dt;
@@ -1317,6 +1434,7 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 
 // --- boot ---
 refreshTrackSelect();
+applyAccessibility();
 applySettingsToUI();
 loadTrackMeshes(TRACKS[0]);
 demoRun = createRun(TRACKS[0]);
@@ -1337,6 +1455,13 @@ window.__drift = {
       distance: run ? run.distance : null,
       done: run ? run.done : null,
       reason: run ? run.reason : null,
+      // M5: FPS guard state lives here too — info() is null on the
+      // menu (no run), and the render check asserts the guard from
+      // the menu phase.
+      perf: {
+        fps: Math.round(fpsEma), level: perfLevel,
+        pixelRatio: renderer.getPixelRatio(), particleScale,
+      },
     };
   },
   tracks() {
@@ -1390,6 +1515,12 @@ window.__drift = {
       // shake strength): with the shake toggle at 0 this stays 0
       // even when an event adds trauma — the toggle's real effect.
       shakeAmp: trauma * trauma * shakeStrength,
+      // M5: FPS guard state — the render check asserts the guard
+      // steps down under swiftshader and that a forced level sticks.
+      perf: {
+        fps: Math.round(fpsEma), level: perfLevel,
+        pixelRatio: renderer.getPixelRatio(), particleScale,
+      },
       audio: audioCtx
         ? { state: audioCtx.state, music: !!musicTimer, musicStep, sfxOn, musicOn }
         : null,
@@ -1428,8 +1559,15 @@ window.__drift = {
   // the same state; the render check uses these to prove the toggles
   // actually change what the player sees).
   setShake(v) { shakeStrength = clamp(v, 0, 1); save.shake = shakeStrength; persistSave(); applySettingsToUI(); },
-  setReduceFlashing(b) { reduceFlashing = !!b; applySettingsToUI(); },
+  setReduceFlashing(b) { reduceFlashing = !!b; save.reduceFlashing = reduceFlashing; persistSave(); applySettingsToUI(); },
   get shake() { return shakeStrength; },
   get reduceFlashing() { return reduceFlashing; },
+  // M5: text size / high contrast / FPS guard hooks.
+  setTextSize(s) { setTextSize(s); },
+  setHighContrast(b) { setHighContrast(b); },
+  get textSize() { return textSize; },
+  get highContrast() { return highContrast; },
+  setPerfLevel(n) { applyPerfLevel(n); lowFpsTime = 0; highFpsTime = 0; },
+  get perfLevel() { return perfLevel; },
   save() { return JSON.parse(JSON.stringify(save)); },
 };

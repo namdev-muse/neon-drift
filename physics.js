@@ -12,8 +12,15 @@
 // banked energy (Thrusters / Plating / Boost Tank, 3 tiers each), a
 // best-distance unlock chain (track N+1 opens at 50% best distance on
 // track N), and Time Trial mode (race the par time for medals).
+//
+// M5 — polish & robustness: accessibility settings (text size,
+// high contrast, reduce-flashing persisted + prefers-reduced-motion
+// default), an FPS guard that steps the pixel ratio and particle
+// budget down under sustained low frame rates and back up on
+// recovery (PERF_LEVELS is the contract), and the save schema carries
+// the new settings so an old save migrates cleanly.
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 export const TUNNEL_RADIUS = 10;
 export const SHIP_RADIUS = 0.55;
 export const SHIELDS = 3;
@@ -777,12 +784,30 @@ export function simulateRun(track, policy, opts = {}) {
   };
 }
 
+// --- M5: FPS guard levels (the contract — game.js applies them) ---
+// Level 0 is full quality; each step down trades pixels and particle
+// count for frame rate. The guard steps down after ~3 s below 28 fps
+// and back up after ~8 s above 50 fps. Particle scale never zeroes a
+// burst: spawnParticles clamps every burst to at least 1 particle.
+export const PERF_LEVELS = [
+  { pixelRatio: 2, particleScale: 1 },
+  { pixelRatio: 1.5, particleScale: 0.7 },
+  { pixelRatio: 1, particleScale: 0.4 },
+];
+export const PERF_LOW_FPS = 28;   // below this, sustained, step down
+export const PERF_HIGH_FPS = 50;  // above this, sustained, step up
+export const PERF_LOW_SECS = 3;   // sustained-low window before stepping down
+export const PERF_HIGH_SECS = 8;  // sustained-high window before stepping up
+
 // --- save (localStorage) ---
 export function defaultSave() {
   return {
     version: SAVE_VERSION, best: {}, bestTime: {},
     energy: 0, upgrades: { thrusters: 0, plating: 0, tank: 0 },
     totalRuns: 0, muted: false, shake: 1,
+    // M5: reduceFlashing null = never chosen — the game follows the
+    // OS prefers-reduced-motion setting until the player picks.
+    reduceFlashing: null, textSize: 'normal', highContrast: false,
   };
 }
 export function serializeSave(save) { return JSON.stringify(save); }
@@ -821,6 +846,11 @@ export function parseSave(text) {
     if (Number.isInteger(s.totalRuns)) d.totalRuns = clamp(s.totalRuns, 0, 100000);
     if (typeof s.muted === 'boolean') d.muted = s.muted;
     if (typeof s.shake === 'number' && Number.isFinite(s.shake)) d.shake = clamp(s.shake, 0, 1);
+    // M5: accessibility settings — invalid values fall back to the
+    // defaults (reduceFlashing null = follow the OS setting).
+    if (s.reduceFlashing === null || typeof s.reduceFlashing === 'boolean') d.reduceFlashing = s.reduceFlashing;
+    if (['normal', 'large', 'xlarge'].includes(s.textSize)) d.textSize = s.textSize;
+    if (typeof s.highContrast === 'boolean') d.highContrast = s.highContrast;
     return d;
   } catch { return d; }
 }

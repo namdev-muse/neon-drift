@@ -50,6 +50,7 @@
   <div class="panel panel-menu">
     <h1>NEON DRIFT</h1>
     <p class="tagline">Steer the ship. Thread the gates. Outrun the tunnel.</p>
+    <p id="webgl-error" class="webgl-error hidden">3D graphics couldn't start in this browser — Neon Drift needs WebGL. Try a recent Chrome, Edge or Firefox on a device with graphics support.</p>
     <div class="menu-col menu-actions">
       <div class="mode-toggle" role="group" aria-label="Game mode">
         <button id="btn-mode-campaign" class="btn small mode-btn active" type="button" aria-pressed="true">Campaign</button>
@@ -126,6 +127,17 @@
     <label class="toggle-row">Reduce flashing
       <input id="reduce-flashing" type="checkbox" aria-label="Reduce flashing — no bright flashes">
     </label>
+    <label class="toggle-row">High contrast
+      <input id="high-contrast" type="checkbox" aria-label="High contrast — brighter panels and text">
+    </label>
+    <div class="settings-row" role="group" aria-label="Text size">
+      <span class="settings-label">Text size</span>
+      <div class="seg" role="group" aria-label="Text size">
+        <button id="btn-text-normal" class="btn small seg-btn active" type="button" aria-pressed="true">Normal</button>
+        <button id="btn-text-large" class="btn small seg-btn" type="button" aria-pressed="false">Large</button>
+        <button id="btn-text-xlarge" class="btn small seg-btn" type="button" aria-pressed="false">Extra large</button>
+      </div>
+    </div>
     <button id="btn-settings-close" class="btn primary" type="button">Back to Menu</button>
   </div>
 </div>
@@ -154,6 +166,7 @@
     <p id="runover-stats" class="runover-stats"></p>
     <p id="runover-best" class="complete-best"></p>
     <p id="runover-energy" class="complete-best"></p>
+    <p id="runover-unlock" class="complete-unlock"></p>
     <button id="btn-retry" class="btn primary" type="button">Fly Again</button>
     <button id="btn-menu-runover" class="btn" type="button">Main Menu</button>
   </div>
