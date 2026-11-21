@@ -1,4 +1,4 @@
-// Neon Drift v0.4.0 — headless Chromium render check.
+// Neon Drift v0.5.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (attract flight actually
@@ -125,8 +125,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__drift.version);
-  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.4.0');
+  if (version !== '0.5.0') throw new Error(`expected version 0.5.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.5.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -142,7 +142,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON DRIFT')) throw new Error('menu title missing');
-  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.5.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -210,6 +210,75 @@ try {
   await page.click('#btn-upgrades-close');
   await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
   console.log('render-check: M4 upgrades — Thrusters bought to level 2 through the UI (100 -> 70 -> 10 energy), unaffordable buy refused with a reason');
+
+  // --- M5: polish & robustness — accessibility settings (UI-driven) ---
+  // Open Settings through the menu button, not a hook: the screen
+  // stack, the controls and the persistence all have to work for a
+  // real player. Text size via the segmented control, high contrast
+  // via the toggle, reduce-flashing via its toggle — each one must
+  // change what the player sees AND survive in the save.
+  await page.click('#btn-settings');
+  await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  // Text size: Large through the hook (fast), Extra large through the
+  // UI button, then back to Normal through the UI button.
+  await page.evaluate(() => window.__drift.setTextSize('large'));
+  let rootSize = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  let textSizeAttr = await page.evaluate(() => document.documentElement.dataset.textSize);
+  if (textSizeAttr !== 'large' || !(rootSize > 16)) {
+    throw new Error(`text size Large should set data-text-size=large and grow the root font (got ${textSizeAttr}, ${rootSize}px)`);
+  }
+  await page.click('#btn-text-xlarge');
+  textSizeAttr = await page.evaluate(() => document.documentElement.dataset.textSize);
+  rootSize = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  const savedSize = await page.evaluate(() => window.__drift.save().textSize);
+  if (textSizeAttr !== 'xlarge' || !(rootSize > 18) || savedSize !== 'xlarge') {
+    throw new Error(`Extra large should persist and grow the root font (attr ${textSizeAttr}, ${rootSize}px, saved ${savedSize})`);
+  }
+  await page.click('#btn-text-normal');
+  textSizeAttr = await page.evaluate(() => document.documentElement.dataset.textSize);
+  rootSize = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  if (textSizeAttr !== 'normal' || rootSize !== 16) {
+    throw new Error(`Normal should restore the root font to 16px (got ${textSizeAttr}, ${rootSize}px)`);
+  }
+  // High contrast: the toggle adds the body class and persists.
+  await page.click('#high-contrast');
+  let hc = await page.evaluate(() => document.body.classList.contains('high-contrast') && window.__drift.save().highContrast === true);
+  if (!hc) throw new Error('high contrast toggle should add the body class and persist');
+  await page.click('#high-contrast');
+  hc = await page.evaluate(() => document.body.classList.contains('high-contrast') || window.__drift.save().highContrast === true);
+  if (hc) throw new Error('high contrast toggle should remove the body class and persist off');
+  // Reduce flashing: before M5 the toggle was NOT persisted, so it
+  // reset on every load — prove the save now carries the choice.
+  await page.evaluate(() => window.__drift.setReduceFlashing(true));
+  if (await page.evaluate(() => window.__drift.save().reduceFlashing) !== true) {
+    throw new Error('reduce-flashing choice must persist in the save');
+  }
+  await page.evaluate(() => window.__drift.setReduceFlashing(false));
+  // FPS guard: under swiftshader the frame rate is far below 28, so
+  // the guard must step down on its own (poll — the EMA needs ~3s to
+  // fall, then 3s sustained low before the first step); a forced
+  // level must stick (level + particle scale), and stepping back to
+  // full quality must restore the full particle budget.
+  try {
+    await page.waitForFunction(() => window.__drift.state.perf.level >= 1, null, { timeout: 25000 });
+  } catch {
+    const p = await page.evaluate(() => window.__drift.state.perf);
+    throw new Error(`FPS guard should have stepped down under swiftshader (level ${p.level}, ${p.fps} fps)`);
+  }
+  const perfAuto = await page.evaluate(() => window.__drift.state.perf);
+  await page.evaluate(() => window.__drift.setPerfLevel(2));
+  let perf = await page.evaluate(() => window.__drift.state.perf);
+  if (perf.level !== 2 || perf.particleScale !== 0.4) {
+    throw new Error(`forced perf level 2 should stick (got level ${perf.level}, particleScale ${perf.particleScale})`);
+  }
+  await page.evaluate(() => window.__drift.setPerfLevel(0));
+  perf = await page.evaluate(() => window.__drift.state.perf);
+  if (perf.level !== 0 || perf.particleScale !== 1) {
+    throw new Error(`perf level 0 should restore the full particle budget (got level ${perf.level}, particleScale ${perf.particleScale})`);
+  }
+  console.log(`render-check: M5 settings — text size (16 -> 18 -> 20px, persisted), high contrast toggles + persists, reduce-flashing persists, FPS guard stepped down on its own (level ${perfAuto.level} at ${perfAuto.fps} fps) and forced levels stick`);
+  await page.click('#btn-settings-close');
+  await page.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden'), null, { timeout: 5000 });
 
   // The attract flight flies behind the menu: the demo ship steers
   // through track 1 with the greedy policy, so the menu scene is alive
@@ -293,6 +362,29 @@ try {
     throw new Error(`ArrowRight did not move the ship right on screen: ${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)}`);
   }
   console.log(`render-check: ArrowRight moves the ship right on screen (${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)})`);
+
+  // --- M5: touch drag steering (real touch input, not synthetic DOM
+  // events) — a touch drag to the right must move the ship right on
+  // screen, and the first real touch must reveal the touch Boost
+  // button. CDP dispatches a genuine touch sequence, so the game's
+  // pointer handlers see a real pointerType: 'touch'.
+  const cdp = await page.context().newCDPSession(page);
+  const scrT0 = await page.evaluate(() => window.__drift.info().screen);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 640, y: 360, id: 1 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 840, y: 360, id: 1 }] });
+  try {
+    await page.waitForFunction((x0) => window.__drift.info().screen.x > x0 + 20, scrT0.x, { timeout: 20000 });
+  } finally {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+  const scrT = await page.evaluate(() => window.__drift.info().screen);
+  if (!(scrT.x > scrT0.x + 20)) {
+    throw new Error(`touch drag right did not move the ship right on screen: ${scrT0.x.toFixed(0)} -> ${scrT.x.toFixed(0)}`);
+  }
+  if (await page.evaluate(() => document.getElementById('btn-boost').classList.contains('hidden'))) {
+    throw new Error('the first real touch should reveal the touch Boost button');
+  }
+  console.log(`render-check: M5 touch drag steers right on screen (${scrT0.x.toFixed(0)} -> ${scrT.x.toFixed(0)}) and reveals the Boost button`);
 
   // Speed ramps and distance grows (poll — swiftshader game time runs
   // slower than real time, so a fixed window cannot prove it).
@@ -569,6 +661,19 @@ try {
   // and finishing track 1 must unlock track 2.
   await page.click('#btn-mode-timetrial');
   await page.waitForFunction(() => window.__drift.mode === 'timetrial', null, { timeout: 5000 });
+  // M5: watch the toast during the Time Trial flight — the 50% gate
+  // must announce the track-2 unlock if track 2 was still locked when
+  // the leg started (a run-over before this leg could already have
+  // unlocked it, in which case no toast is due — the observer records
+  // what actually happened either way).
+  const unlockedBeforeTT = await page.evaluate(() => window.__drift.unlocked(2));
+  await page.evaluate(() => {
+    window.__unlockToastSeen = false;
+    const el = document.getElementById('hud-toast');
+    new MutationObserver(() => {
+      if (el.textContent.includes('UNLOCKED')) window.__unlockToastSeen = true;
+    }).observe(el, { childList: true, characterData: true, subtree: true });
+  });
   await page.evaluate(() => window.__drift.start(1, 'timetrial'));
   await page.waitForFunction(() => window.__drift.state.phase === 'run', null, { timeout: 5000 });
   if (await page.evaluate(() => document.getElementById('hud-time').classList.contains('hidden'))) {
@@ -613,6 +718,14 @@ try {
   const lockedAfter = await page.locator('#track-select .track-card.locked').count();
   if (lockedAfter !== 10) throw new Error(`expected 10 locked tracks after unlocking track 2, got ${lockedAfter}`);
   console.log('render-check: M4 finishing track 1 unlocks track 2 (10 tracks still locked)');
+  // M5: the 50% gate must have announced the unlock mid-run — unless
+  // track 2 was already unlocked before the leg, in which case the
+  // toast was correctly silent (the unlock is only news once).
+  const unlockToastSeen = await page.evaluate(() => window.__unlockToastSeen);
+  if (!unlockedBeforeTT && !unlockToastSeen) {
+    throw new Error('the 50% distance gate should toast the track-2 unlock when track 2 was still locked');
+  }
+  console.log(`render-check: M5 50% unlock toast ${unlockedBeforeTT ? 'correctly silent (track 2 was already unlocked)' : 'announced mid-run'}`);
   await page.click('#btn-mode-campaign');
 
   if (errors.length) {

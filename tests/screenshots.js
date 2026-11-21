@@ -1,9 +1,10 @@
-// Neon Drift v0.4.0 — real gameplay screenshot capture + size sweep.
+// Neon Drift v0.5.0 — real gameplay screenshot capture + size sweep.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // captures three PNGs into docs/screenshots/ for the README:
 //   menu.png      — the main menu over the live 3D attract scene
 //   gameplay.png  — track 1 mid-run, ship banking through the tunnel
 //   runover.png   — the run-over screen after the ship is down
+//   settings.png  — the M5 settings screen (text size, high contrast)
 // Then runs the game-ui-ux size sweep (1280x720, 2560x1080, 1080x2340):
 // menu screenshots at each size go to /tmp/neon-drift-size-sweep/ for the
 // by-eye check — no clipped or overlapping elements at any size.
@@ -119,6 +120,19 @@ try {
     await page.click('#btn-upgrades-close');
     await page.waitForTimeout(400);
 
+    // M5: settings screen (text size segmented control, high
+    // contrast toggle, reduce-flashing) — with Large text on, so the
+    // capture also proves the bigger type still fits the panel.
+    await page.click('#btn-settings');
+    await page.waitForTimeout(800);
+    await page.click('#btn-text-large');
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(SHOTS_DIR, 'settings.png') });
+    console.log('screenshots: settings.png captured (Large text)');
+    await page.click('#btn-text-normal');
+    await page.click('#btn-settings-close');
+    await page.waitForTimeout(400);
+
     await page.click('#btn-play');
     await page.waitForFunction(() => window.__drift.state.phase === 'run', null, { timeout: 5000 });
     await page.evaluate(() => window.__drift.autopilot(true));
@@ -205,6 +219,17 @@ try {
       await page.waitForTimeout(800);
       await page.screenshot({ path: path.join(SWEEP_DIR, 'upgrades-1080x2340.png') });
       console.log('screenshots: size sweep upgrades-1080x2340.png captured');
+      // M5: the settings screen at the phone size, with Extra large
+      // text on — the tightest fit in the game (longest labels, most
+      // controls, biggest type).
+      await page.click('#btn-upgrades-close');
+      await page.waitForTimeout(400);
+      await page.click('#btn-settings');
+      await page.waitForTimeout(800);
+      await page.click('#btn-text-xlarge');
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: path.join(SWEEP_DIR, 'settings-1080x2340.png') });
+      console.log('screenshots: size sweep settings-1080x2340.png captured (Extra large text)');
     }
     await context.close();
   }

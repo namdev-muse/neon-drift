@@ -1,4 +1,4 @@
-// Neon Drift v0.4.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Drift v0.5.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, TRACKS, trackById, buildTrack, barrierGapAt, createRun, stepRun,
   simulateRun, centrePolicy, greedyPolicy, TUNNEL_RADIUS, SHIP_RADIUS, SHIELDS,
@@ -7,6 +7,7 @@ import {
   ENERGY_CELL, ENERGY_GATE, ENERGY_DIST_GATE, DIST_GATE_FRACTIONS,
   UPGRADE_DEFS, upgradeEffect, buyUpgrade, UNLOCK_FRACTION,
   isTrackUnlocked, MEDAL_MULT, medalForTime, recordBestTime,
+  PERF_LEVELS, PERF_LOW_FPS, PERF_HIGH_FPS, PERF_LOW_SECS, PERF_HIGH_SECS,
 } from '../physics.js';
 
 let passed = 0, failed = 0;
@@ -17,7 +18,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.4.0', VERSION === '0.4.0');
+check('physics version is 0.5.0', VERSION === '0.5.0');
 check('12 tracks defined', TRACKS.length === 12);
 check('track ids are 1..12 in order', TRACKS.every((t, i) => t.id === i + 1));
 check('every track has a name and a hint', TRACKS.every((t) => t.name && t.hint));
@@ -307,6 +308,40 @@ check('collect and gate are small with no hit-stop',
   check('save clamps absurd distances', parseSave('{"best":{"1":{"distance":999999,"score":1}}}').best[1].distance === 10000);
   check('save round-trips mute and shake', parseSave('{"muted":true,"shake":0.5}').muted === true
     && parseSave('{"muted":true,"shake":0.5}').shake === 0.5);
+}
+
+// --- M5: accessibility settings + FPS guard contract ---
+{
+  const d = defaultSave();
+  check('default save follows the OS for flashing (null = unset)', d.reduceFlashing === null);
+  check('default save text size is normal', d.textSize === 'normal');
+  check('default save high contrast is off', d.highContrast === false);
+  check('save round-trips accessibility settings',
+    parseSave('{"reduceFlashing":true,"textSize":"large","highContrast":true}').reduceFlashing === true
+    && parseSave('{"reduceFlashing":true,"textSize":"large","highContrast":true}').textSize === 'large'
+    && parseSave('{"reduceFlashing":true,"textSize":"large","highContrast":true}').highContrast === true);
+  check('save accepts reduceFlashing null (follow OS)',
+    parseSave('{"reduceFlashing":null}').reduceFlashing === null);
+  check('save drops invalid text size, keeps the default',
+    parseSave('{"textSize":"huge"}').textSize === 'normal');
+  check('save drops non-boolean high contrast',
+    parseSave('{"highContrast":"yes"}').highContrast === false);
+  check('save drops non-boolean reduceFlashing',
+    parseSave('{"reduceFlashing":"yes"}').reduceFlashing === null);
+  check('old saves migrate with M5 defaults (null flashing, normal text, no contrast)',
+    parseSave('{"best":{"1":{"distance":500,"score":100}}}').reduceFlashing === null
+    && parseSave('{"best":{"1":{"distance":500,"score":100}}}').textSize === 'normal'
+    && parseSave('{"best":{"1":{"distance":500,"score":100}}}').highContrast === false);
+  check('FPS guard has 3 levels', PERF_LEVELS.length === 3);
+  check('FPS guard levels step pixel ratio down (2 → 1.5 → 1)',
+    PERF_LEVELS[0].pixelRatio === 2 && PERF_LEVELS[1].pixelRatio === 1.5 && PERF_LEVELS[2].pixelRatio === 1);
+  check('FPS guard levels step particle scale down (1 → 0.7 → 0.4)',
+    PERF_LEVELS[0].particleScale === 1 && PERF_LEVELS[1].particleScale === 0.7 && PERF_LEVELS[2].particleScale === 0.4);
+  check('FPS guard never zeroes a burst (lowest particle scale still shows events)',
+    PERF_LEVELS[2].particleScale > 0);
+  check('FPS guard thresholds are sane (step down below 28, up above 50)',
+    PERF_LOW_FPS === 28 && PERF_HIGH_FPS === 50 && PERF_LOW_FPS < PERF_HIGH_FPS);
+  check('FPS guard windows are 3s down / 8s up', PERF_LOW_SECS === 3 && PERF_HIGH_SECS === 8);
 }
 
 // --- M4: energy economy, upgrades, unlocks, Time Trial medals ---
